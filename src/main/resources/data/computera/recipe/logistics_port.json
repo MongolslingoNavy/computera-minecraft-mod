@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IXI",
+    "RCR",
+    "IXI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "X": "computera:copper_wire",
+    "R": "minecraft:redstone",
+    "C": "minecraft:chest"
+  },
+  "result": {
+    "id": "computera:logistics_port",
+    "count": 1
+  }
+}

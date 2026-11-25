@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "NQN",
+    "QCQ",
+    "NQN"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "Q": "minecraft:redstone_block",
+    "C": "computera:compute_card_3"
+  },
+  "result": {
+    "id": "computera:compute_card_4",
+    "count": 1
+  }
+}

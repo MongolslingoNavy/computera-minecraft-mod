@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "SES",
+    "ECE",
+    "SES"
+  ],
+  "key": {
+    "S": "minecraft:nether_star",
+    "E": "minecraft:echo_shard",
+    "C": "computera:compute_card_4"
+  },
+  "result": {
+    "id": "computera:compute_card_5",
+    "count": 1
+  }
+}

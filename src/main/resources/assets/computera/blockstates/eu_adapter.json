@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "computera:block/eu_adapter"
+    }
+  }
+}

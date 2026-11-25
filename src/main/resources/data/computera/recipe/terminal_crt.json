@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GGG",
+    "GXG",
+    "IRI"
+  ],
+  "key": {
+    "G": "minecraft:glass",
+    "X": "computera:copper_wire",
+    "I": "minecraft:iron_ingot",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "computera:terminal_crt",
+    "count": 1
+  }
+}

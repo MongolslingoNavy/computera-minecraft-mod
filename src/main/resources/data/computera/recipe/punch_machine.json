@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ILI",
+    "IXI",
+    "IRI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "L": "minecraft:lever",
+    "X": "computera:copper_wire",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "computera:punch_machine",
+    "count": 1
+  }
+}

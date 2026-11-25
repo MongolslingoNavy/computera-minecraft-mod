@@ -1,0 +1,36 @@
+pluginManagement {
+    repositories {
+        maven {
+            name = 'NeoForgedMirror'
+            url = 'https://1755624453.rsc.cdn77.org/releases'
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+// maven.neoforged.net is unreachable from this network. The CDN host below serves
+// the same /releases and /mojang-meta trees, so every NeoForged repository the
+// plugins add gets its host rewritten while keeping its path.
+gradle.projectsLoaded {
+    gradle.rootProject.allprojects { project ->
+        project.repositories.all { repo ->
+            if (repo instanceof MavenArtifactRepository) {
+                def url = repo.url.toString()
+                if (url.contains('maven.neoforged.net')) {
+                    repo.url = url.replace('https://maven.neoforged.net', 'https://1755624453.rsc.cdn77.org')
+                }
+            }
+        }
+        if (project.repositories.findByName('NeoForgedMirror') == null) {
+            project.repositories.maven {
+                name = 'NeoForgedMirror'
+                url = 'https://1755624453.rsc.cdn77.org/releases'
+            }
+        }
+    }
+}

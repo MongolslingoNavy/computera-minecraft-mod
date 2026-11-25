@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "DAD",
+    "ACA",
+    "DAD"
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "A": "minecraft:amethyst_shard",
+    "C": "computera:compute_card_2"
+  },
+  "result": {
+    "id": "computera:compute_card_3",
+    "count": 1
+  }
+}

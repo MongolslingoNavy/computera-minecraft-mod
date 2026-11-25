@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "computera:copper_wire",
+    "minecraft:leather"
+  ],
+  "result": {
+    "id": "computera:cable",
+    "count": 8
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GGG",
+    "GXG",
+    "GIG"
+  ],
+  "key": {
+    "G": "minecraft:glass",
+    "X": "computera:copper_wire",
+    "I": "minecraft:iron_ingot"
+  },
+  "result": {
+    "id": "computera:display_panel",
+    "count": 4
+  }
+}

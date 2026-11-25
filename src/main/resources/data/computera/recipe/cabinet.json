@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IXI",
+    "XCX",
+    "IXI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "X": "computera:copper_wire",
+    "C": "minecraft:redstone"
+  },
+  "result": {
+    "id": "computera:cabinet",
+    "count": 1
+  }
+}

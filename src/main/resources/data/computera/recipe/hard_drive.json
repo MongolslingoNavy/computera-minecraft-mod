@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IXI",
+    "QGQ",
+    "IXI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "X": "computera:copper_wire",
+    "Q": "minecraft:redstone",
+    "G": "minecraft:glass"
+  },
+  "result": {
+    "id": "computera:hard_drive",
+    "count": 1
+  }
+}

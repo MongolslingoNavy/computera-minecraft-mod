@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "computera:block/terminal_crt"
+    }
+  }
+}

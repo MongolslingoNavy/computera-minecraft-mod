@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GQG",
+    "QCQ",
+    "GQG"
+  ],
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "Q": "minecraft:redstone_block",
+    "C": "computera:compute_card_1"
+  },
+  "result": {
+    "id": "computera:compute_card_2",
+    "count": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "XWX",
+    "QRQ",
+    "XXX"
+  ],
+  "key": {
+    "X": "computera:copper_wire",
+    "W": "minecraft:quartz",
+    "Q": "minecraft:redstone",
+    "R": "minecraft:paper"
+  },
+  "result": {
+    "id": "computera:compute_card_1",
+    "count": 1
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ILI",
+    "PXP",
+    "IRI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "L": "minecraft:lever",
+    "P": "minecraft:paper",
+    "X": "computera:copper_wire",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "computera:terminal_teletype",
+    "count": 1
+  }
+}

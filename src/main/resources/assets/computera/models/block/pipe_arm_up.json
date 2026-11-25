@@ -1,0 +1,41 @@
+{
+  "textures": {
+    "all": "computera:block/pipe",
+    "joint": "computera:block/pipe_flange",
+    "particle": "computera:block/pipe"
+  },
+  "elements": [
+    {
+      "from": [
+        4,
+        11,
+        4
+      ],
+      "to": [
+        12,
+        16,
+        12
+      ],
+      "faces": {
+        "north": {
+          "texture": "#all"
+        },
+        "south": {
+          "texture": "#all"
+        },
+        "east": {
+          "texture": "#all"
+        },
+        "west": {
+          "texture": "#all"
+        },
+        "up": {
+          "texture": "#all"
+        },
+        "down": {
+          "texture": "#all"
+        }
+      }
+    }
+  ]
+}

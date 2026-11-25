@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "minecraft:iron_ingot",
+    "minecraft:paper"
+  ],
+  "result": {
+    "id": "computera:guide_book",
+    "count": 1
+  }
+}
