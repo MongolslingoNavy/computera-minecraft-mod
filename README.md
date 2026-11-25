@@ -1,8 +1,8 @@
-<h1><img src="icon.png" width="56" height="56" align="absmiddle" alt=""> Computera 2: The New Era</h1>
+<h1><img src="icon.png" width="56" height="56" align="absmiddle" alt=""> Computera 2</h1>
 
 **简体中文** · [English](README.en.md)
 
-**Computera 2: The New Era（计算时代2：新纪元）** 是 [IndustrialCraft²: The New Era（工业时代2：新纪元）](https://github.com/spectrum527/IndustrialCraft2-The-New-Era) 的计算机与物流自动化附属模组，也可独立安装运行。
+**Computera 2（计算时代2：新纪元）** 是 [IndustrialCraft²: The New Era（工业时代2：新纪元）](https://github.com/spectrum527/IndustrialCraft2-The-New-Era) 的计算机与物流自动化附属模组，也可独立安装运行。
 
 ## 下载与安装
 
