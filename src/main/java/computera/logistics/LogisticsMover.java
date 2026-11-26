@@ -34,12 +34,21 @@ public final class LogisticsMover {
         Map<BlockPos, Boolean> seen = new HashMap<>();
 
         for (BlockPos portPos : cluster.ports()) {
+            if (!level.hasChunkAt(portPos)) {
+                continue;
+            }
             String filter = level.getBlockEntity(portPos) instanceof LogisticsPortBlockEntity port
                     ? port.filter()
                     : null;
             for (Direction direction : Direction.values()) {
                 BlockPos pos = portPos.relative(direction);
-                if (seen.putIfAbsent(pos, Boolean.TRUE) != null) {
+                if (!level.hasChunkAt(pos)) {
+                    continue;
+                }
+                BlockPos canonicalPos = level.getBlockEntity(pos) instanceof computera.blockentity.CrateBlockEntity crate
+                        ? crate.groupRoot()
+                        : pos;
+                if (seen.putIfAbsent(canonicalPos, Boolean.TRUE) != null) {
                     continue;
                 }
                 ResourceHandler<ItemResource> handler =
@@ -47,10 +56,11 @@ public final class LogisticsMover {
                 if (handler == null) {
                     continue;
                 }
-                Endpoint endpoint = new Endpoint(pos, handler);
-                sources.add(endpoint);
+                Endpoint endpoint = new Endpoint(canonicalPos, handler);
                 if (filter != null) {
                     destinations.computeIfAbsent(filter, ignored -> new ArrayList<>()).add(endpoint);
+                } else {
+                    sources.add(endpoint);
                 }
             }
         }

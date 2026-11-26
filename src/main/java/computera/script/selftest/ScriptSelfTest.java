@@ -43,6 +43,7 @@ public final class ScriptSelfTest {
         testTimeBuiltin();
         testHalt();
         testCompileErrors();
+        testSafetyAndDosProtections();
 
         System.out.println();
         int total = passed + failed;
@@ -583,6 +584,96 @@ public final class ScriptSelfTest {
                 comparisonChain != null && comparisonChain.line == 1
                         && comparisonChain.getMessage().contains("comparison chaining"),
                 "line 1 comparison chaining error", describe(comparisonChain));
+    }
+
+    private static void testSafetyAndDosProtections() {
+        // 1. Parser recursion depth limit (6000 nested parens must fail cleanly, never StackOverflowError)
+        String deepParens = "(".repeat(6000) + "1" + ")".repeat(6000) + "\n";
+        ScriptCompileException depthError = compileError(deepParens);
+        check("deeply nested parens rejected without StackOverflowError",
+                depthError != null && depthError.getMessage().contains("nesting depth"),
+                "nesting depth compile error", describe(depthError));
+
+        // 2. String doubling memory bomb (28 doublings must hit MemoryError, never OOM)
+        Run stringBomb = run("""
+                s = "AAAAAAAAAAAAAAAA"
+                for i in range(28):
+                    s = s + s
+                print(len(s))
+                """);
+        String strErr = stringBomb.host != null && !stringBomb.host.errors.isEmpty()
+                ? stringBomb.host.errors.get(0) : "";
+        check("string doubling blocked by length limit",
+                stringBomb.compileError == null && strErr.contains("MemoryError")
+                        && stringBomb.vm.isFinished(),
+                "MemoryError and finished", errorsOf(stringBomb));
+
+        // 3. Doubly self-referential cyclic list print() must finish immediately with [...]
+        long cycleStart = System.nanoTime();
+        Run cyclePrint = run("""
+                a = [0, 0]
+                a[0] = a
+                a[1] = a
+                print(a)
+                """);
+        long cycleMs = (System.nanoTime() - cycleStart) / 1_000_000L;
+        check("cyclic list print finishes quickly with cycle marker",
+                cyclePrint.compileError == null && cyclePrint.host.errors.isEmpty()
+                        && cyclePrint.vm.isFinished() && cycleMs < 1000L
+                        && cyclePrint.host.prints.equals(List.of("[[...], [...]]")),
+                "prints=[[[...], [...]]] in <1000ms",
+                "ms=" + cycleMs + ", prints=" + (cyclePrint.host == null ? "null" : cyclePrint.host.prints)
+                        + ", errors=" + errorsOf(cyclePrint));
+
+        // 4. Depth-28 shared DAG equality (a == b) must finish quickly without exponential hang
+        long dagStart = System.nanoTime();
+        Run dagEq = run("""
+                a = [1, 1]
+                b = [1, 1]
+                for i in range(28):
+                    a = [a, a]
+                    b = [b, b]
+                print(a == b)
+                """);
+        long dagMs = (System.nanoTime() - dagStart) / 1_000_000L;
+        check("depth-28 DAG equality finishes quickly without hang",
+                dagEq.compileError == null && dagEq.host.errors.isEmpty()
+                        && dagEq.vm.isFinished() && dagMs < 1000L
+                        && dagEq.host.prints.equals(List.of("True")),
+                "prints=[True] in <1000ms",
+                "ms=" + dagMs + ", prints=" + (dagEq.host == null ? "null" : dagEq.host.prints)
+                        + ", errors=" + errorsOf(dagEq));
+
+        // 5. range(1000000) rejected cleanly by RANGE_LIMIT (10,000) and range cost billed to budget
+        Run rangeTooBig = run("""
+                x = range(1000000)
+                print(len(x))
+                """);
+        String rangeErr = rangeTooBig.host != null && !rangeTooBig.host.errors.isEmpty()
+                ? rangeTooBig.host.errors.get(0) : "";
+        check("range(1000000) rejected by safe range limit",
+                rangeTooBig.compileError == null && rangeErr.contains("ValueError")
+                        && rangeErr.contains("10000"),
+                "ValueError with limit 10000", errorsOf(rangeTooBig));
+
+        try {
+            ScriptProgram rangeCostProg = ScriptCompiler.compile("""
+                    a = range(5000)
+                    print("done")
+                    """, "range_cost.py");
+            Host costHost = new Host();
+            ScriptVM costVm = new ScriptVM(rangeCostProg, costHost);
+            boolean stillAlive = costVm.step(1000);
+            check("range() cost is billed against instruction budget",
+                    stillAlive && costHost.prints.isEmpty(),
+                    "yielded before print", "stillAlive=" + stillAlive + ", prints=" + costHost.prints);
+            while (!costVm.isFinished()) {
+                costVm.step(1000);
+            }
+            checkEquals("range() billed script resumes to completion", List.of("done"), costHost.prints);
+        } catch (ScriptCompileException e) {
+            fail("range() cost is billed against instruction budget", "compiled program", e.getMessage());
+        }
     }
 
     private static Run run(String source) {

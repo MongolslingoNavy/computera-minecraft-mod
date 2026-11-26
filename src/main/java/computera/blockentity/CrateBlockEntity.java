@@ -75,7 +75,7 @@ public class CrateBlockEntity extends BlockEntity implements MenuProvider, net.m
         queue.add(worldPosition.immutable());
         while (!queue.isEmpty() && members.size() < MAX_CRATES) {
             BlockPos pos = queue.poll();
-            if (!seen.add(pos)) {
+            if (!seen.add(pos) || !serverLevel.hasChunkAt(pos)) {
                 continue;
             }
             if (!(serverLevel.getBlockEntity(pos) instanceof CrateBlockEntity crate) || crate.isRemoved()) {

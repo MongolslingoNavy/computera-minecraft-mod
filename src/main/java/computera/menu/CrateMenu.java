@@ -30,6 +30,11 @@ public class CrateMenu extends AbstractContainerMenu {
                 public boolean mayPlace(ItemStack stack) {
                     return CrateMenu.this.container.canPlace(getContainerSlot());
                 }
+
+                @Override
+                public boolean isActive() {
+                    return CrateMenu.this.container.canPlace(getContainerSlot());
+                }
             });
         }
         for (int row = 0; row < 3; row++) {
@@ -56,7 +61,7 @@ public class CrateMenu extends AbstractContainerMenu {
     }
 
     public boolean isOnScreen(int index) {
-        return index >= 0 && index < CrateContainer.PAGE_SLOTS && index < container.getContainerSize();
+        return container.canPlace(index);
     }
 
     @Override

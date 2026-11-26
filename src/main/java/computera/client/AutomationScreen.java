@@ -41,6 +41,7 @@ public class AutomationScreen extends Screen {
 
     private int left;
     private int top;
+    private int ruleScroll;
 
     private boolean pickerOpen;
     private int pickerTab;
@@ -221,15 +222,18 @@ public class AutomationScreen extends Screen {
             return true;
         }
 
-        int rows = Math.min(rules.size(), MAX_ROWS);
+        int maxRuleScroll = Math.max(0, rules.size() - MAX_ROWS);
+        ruleScroll = Math.max(0, Math.min(ruleScroll, maxRuleScroll));
+        int rows = Math.min(rules.size() - ruleScroll, MAX_ROWS);
         for (int i = 0; i < rows; i++) {
+            int index = ruleScroll + i;
             int y = top + 30 + i * ROW;
             if (inside(mx, my, left + WIDTH - 78, y, 34, 14)) {
-                send("auto_toggle", String.valueOf(i), "");
+                send("auto_toggle", String.valueOf(index), "");
                 return true;
             }
             if (inside(mx, my, left + WIDTH - 40, y, 34, 14)) {
-                send("auto_del", String.valueOf(i), "");
+                send("auto_del", String.valueOf(index), "");
                 return true;
             }
         }
@@ -241,6 +245,11 @@ public class AutomationScreen extends Screen {
         if (pickerOpen) {
             pickerScroll = Math.max(0, Math.min(pickerPageCount() - 1,
                     pickerScroll + (scrollY < 0 ? 1 : -1)));
+            return true;
+        }
+        if (rules.size() > MAX_ROWS) {
+            ruleScroll = Math.max(0, Math.min(rules.size() - MAX_ROWS,
+                    ruleScroll + (scrollY < 0 ? 1 : -1)));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -260,20 +269,28 @@ public class AutomationScreen extends Screen {
 
         graphics.text(this.font, Component.translatable("computera.gui.auto.title"),
                 left + 10, top + 8, 0xFF8FE0A8, false);
+        int maxRuleScroll = Math.max(0, rules.size() - MAX_ROWS);
+        ruleScroll = Math.max(0, Math.min(ruleScroll, maxRuleScroll));
+        if (maxRuleScroll > 0) {
+            graphics.text(this.font, Component.literal((ruleScroll + 1) + "/" + (maxRuleScroll + 1)),
+                    left + WIDTH - 42, top + 8, 0xFF5F8A6A, false);
+        }
 
-        int rows = Math.min(rules.size(), MAX_ROWS);
+        int rows = Math.min(rules.size() - ruleScroll, MAX_ROWS);
         if (rules.isEmpty()) {
             graphics.text(this.font, Component.translatable("computera.gui.auto.empty"),
                     left + 12, top + 34, 0xFF4F6A58, false);
         }
+        String moveLabel = Component.translatable("computera.gui.auto.type.move").getString();
         for (int i = 0; i < rows; i++) {
-            String[] p = rules.get(i).split("\\|", 7);
+            int index = ruleScroll + i;
+            String[] p = rules.get(index).split("\\|", 7);
             int y = top + 30 + i * ROW;
             graphics.fill(left + 8, y, left + WIDTH - 84, y + 14, i % 2 == 0 ? 0xFF18261C : 0xFF141F18);
             String summary = p.length >= 6
-                    ? "搬运 " + p[1] + " -> " + p[2]
+                    ? moveLabel + " " + p[1] + " -> " + p[2]
                       + "  " + p[3] + " x" + p[4] + "  /" + p[5] + "t"
-                    : rules.get(i);
+                    : rules.get(index);
             graphics.text(this.font, trim(summary, 40), left + 12, y + 3,
                     p.length >= 7 && Boolean.parseBoolean(p[6]) ? 0xFFC8E8D0 : 0xFF6A7A6E, false);
             drawButton(graphics, left + WIDTH - 78, y, 34, 14,
@@ -408,6 +425,12 @@ public class AutomationScreen extends Screen {
 
     private String trim(String text, int max) {
         return this.font.width(text) <= max * 6 ? text : this.font.plainSubstrByWidth(text, max * 6) + "…";
+    }
+
+    @Override
+    public void onClose() {
+        send("close", "", "");
+        super.onClose();
     }
 
     @Override

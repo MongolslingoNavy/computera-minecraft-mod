@@ -73,6 +73,16 @@ public abstract class CordBlock extends Block {
             return;
         }
         refresh(level, pos, state);
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            computera.cluster.ClusterManager.invalidate(serverLevel, pos);
+        }
+    }
+
+    @Override
+    protected void affectNeighborsAfterRemoval(BlockState state, net.minecraft.server.level.ServerLevel level,
+                                               BlockPos pos, boolean movedByPiston) {
+        computera.cluster.ClusterManager.invalidate(level, pos);
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
     }
 
     @Override

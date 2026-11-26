@@ -30,7 +30,7 @@ public class PunchMachineBlockEntity extends BlockEntity {
             return;
         }
         if (stack.is(ModItems.BLANK_CARD.get())) {
-            String file = terminal.editingFile();
+            String file = terminal.editingFile(player);
             if (file == null || file.isEmpty()) {
                 message(player, "open a file in the terminal first");
                 return;
@@ -40,27 +40,46 @@ public class PunchMachineBlockEntity extends BlockEntity {
                 message(player, "file not found: " + file);
                 return;
             }
+            String cardName = stripDrivePrefix(file);
             ItemStack card = new ItemStack(ModItems.PUNCHED_CARD.get(), 1);
-            ProgramItems.writeCard(card, file, source);
-            stack.shrink(1);
+            if (!ProgramItems.writeCard(card, cardName, source)) {
+                message(player, "file is too large for a punched card");
+                return;
+            }
+            if (!player.getAbilities().instabuild) {
+                stack.shrink(1);
+            }
             if (stack.isEmpty()) {
                 player.setItemInHand(hand, card);
             } else if (!player.getInventory().add(card)) {
                 player.drop(card, false);
             }
-            message(player, "punched " + file);
+            message(player, "punched " + cardName);
         } else if (stack.is(ModItems.PUNCHED_CARD.get())) {
-            String name = ProgramItems.singleName(stack);
-            String source = ProgramItems.read(stack, name);
+            String name = stripDrivePrefix(ProgramItems.singleName(stack));
+            String source = ProgramItems.read(stack, ProgramItems.singleName(stack));
             if (name.isEmpty() || source == null) {
                 message(player, "card has no program");
                 return;
             }
-            terminal.saveFileFromCard(name, source);
-            message(player, "loaded " + name + " from card");
+            if (terminal.saveFileFromCard(name, source)) {
+                message(player, "loaded " + name + " from card");
+            } else {
+                message(player, "cannot save file (cabinet missing or full)");
+            }
         } else {
             message(player, "hold a blank or punched card");
         }
+    }
+
+    private static String stripDrivePrefix(String name) {
+        if (name == null) {
+            return "";
+        }
+        if (name.startsWith("hd1:") || name.startsWith("hd2:")) {
+            return name.substring(4);
+        }
+        return name;
     }
 
     @Nullable

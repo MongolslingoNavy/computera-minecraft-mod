@@ -52,6 +52,9 @@ public class CrateScreen extends AbstractContainerScreen<CrateMenu> {
         graphics.fill(x + imageWidth - 2, y, x + imageWidth, y + imageHeight, 0xFF8B8B8B);
 
         for (var slot : this.menu.slots) {
+            if (!slot.isActive()) {
+                continue;
+            }
             int sx = x + slot.x;
             int sy = y + slot.y;
             graphics.fill(sx - 1, sy - 1, sx + 17, sy + 17, 0xFF373737);

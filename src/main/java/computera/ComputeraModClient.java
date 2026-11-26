@@ -21,6 +21,7 @@ public class ComputeraModClient {
 
     @SubscribeEvent
     static void onClientSetup(FMLClientSetupEvent event) {
+        computera.item.GuideBookItem.setClientOpener(computera.client.GuideBookScreen::open);
         Computera.LOGGER.info("Computera client setup");
     }
 

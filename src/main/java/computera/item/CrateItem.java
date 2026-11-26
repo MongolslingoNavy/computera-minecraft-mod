@@ -36,8 +36,8 @@ public class CrateItem extends BlockItem {
             }
         }
         if (total > CrateBlockEntity.MAX_CRATES) {
-            player.sendSystemMessage(Component.literal(
-                    "[Computera] 集装箱组最多 " + CrateBlockEntity.MAX_CRATES + " 个"));
+            player.sendSystemMessage(Component.translatable(
+                    "computera.msg.crate_limit", CrateBlockEntity.MAX_CRATES));
             return null;
         }
         return context;

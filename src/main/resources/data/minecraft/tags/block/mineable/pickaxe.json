@@ -1,0 +1,15 @@
+{
+  "replace": false,
+  "values": [
+    "computera:cabinet",
+    "computera:cable",
+    "computera:terminal_teletype",
+    "computera:terminal_crt",
+    "computera:punch_machine",
+    "computera:logistics_port",
+    "computera:logistics_pipe",
+    "computera:eu_adapter",
+    "computera:crate",
+    "computera:display_panel"
+  ]
+}

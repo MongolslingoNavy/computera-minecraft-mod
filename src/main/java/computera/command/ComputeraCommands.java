@@ -363,7 +363,7 @@ public final class ComputeraCommands {
                 first.setPos(first.getX() + 20, first.getY(), first.getZ());
                 ok &= check(results, "remote menu rejects leaving terminal", !computera.menu.RemoteMenus.stillValid(remote, first));
                 first.setPos(terminalPos.getX() + 0.5, terminalPos.getY(), terminalPos.getZ() + 0.5);
-                cabinet.wireless().remove(remotePos);
+                cabinet.removeWireless(remotePos);
                 ok &= check(results, "remote menu rejects disconnected device", !computera.menu.RemoteMenus.stillValid(remote, first));
                 cabinet.addWireless(remotePos);
                 level.setBlock(remotePos, Blocks.AIR.defaultBlockState(), 3);
@@ -374,14 +374,19 @@ public final class ComputeraCommands {
                 var uiPlayer = new net.neoforged.neoforge.common.util.FakePlayer(level,
                         new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "AuditMenu")) {
                     @Override
-                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider,
-                            java.util.function.Consumer<net.minecraft.network.RegistryFriendlyByteBuf> writer) {
+                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider) {
                         var menu = menuProvider.createMenu(82, getInventory(), this);
                         if (menu == null) {
                             return java.util.OptionalInt.empty();
                         }
                         containerMenu = menu;
                         return java.util.OptionalInt.of(82);
+                    }
+
+                    @Override
+                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider,
+                            java.util.function.Consumer<net.minecraft.network.RegistryFriendlyByteBuf> writer) {
+                        return openMenu(menuProvider);
                     }
                 };
                 uiPlayer.setPos(first.position());
@@ -393,12 +398,19 @@ public final class ComputeraCommands {
                         continue;
                     }
                     level.setBlock(remotePos, block.defaultBlockState(), 3);
+                    cabinet.addWireless(remotePos);
                     String key = DeviceRegistry.positions(level, cluster).entrySet().stream()
                             .filter(entry -> entry.getValue().equals(remotePos)).map(Map.Entry::getKey).findFirst().orElse("");
                     terminal.handleAction(uiPlayer, "logi_open", key, "");
                     var opened = uiPlayer.containerMenu;
-                    ok &= check(results, "logi_open native menu " + blockId,
-                            opened != uiPlayer.inventoryMenu && computera.menu.RemoteMenus.stillValid(opened, uiPlayer));
+                    boolean expectOpen = !blockId.startsWith("ic2:");
+                    if (expectOpen) {
+                        ok &= check(results, "logi_open native menu " + blockId,
+                                opened != uiPlayer.inventoryMenu && computera.menu.RemoteMenus.stillValid(opened, uiPlayer));
+                    } else {
+                        ok &= check(results, "logi_open rejects third-party menu " + blockId,
+                                opened == uiPlayer.inventoryMenu);
+                    }
                     if (opened != uiPlayer.inventoryMenu) {
                         opened.removed(uiPlayer);
                         uiPlayer.containerMenu = uiPlayer.inventoryMenu;

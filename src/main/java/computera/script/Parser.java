@@ -4,13 +4,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class Parser {
+    static final int MAX_DEPTH = 128;
+
     private final List<Token> tokens;
     private final String filename;
     private int index;
+    private int depth;
 
     Parser(List<Token> tokens, String filename) {
         this.tokens = tokens;
         this.filename = filename;
+    }
+
+    private void enterDepth(Token token) throws ScriptCompileException {
+        if (++depth > MAX_DEPTH) {
+            depth--;
+            throw error(token, "nesting depth limit exceeded (" + MAX_DEPTH + ")");
+        }
     }
 
     Ast.Program parse() throws ScriptCompileException {
@@ -206,17 +216,22 @@ final class Parser {
     }
 
     private List<Ast.Stmt> parseSuite() throws ScriptCompileException {
-        expect(TokenType.NEWLINE, "end of line after ':'");
-        expect(TokenType.INDENT, "an indented block");
-        List<Ast.Stmt> body = new ArrayList<>();
-        while (!check(TokenType.DEDENT) && !check(TokenType.EOF)) {
-            if (match(TokenType.NEWLINE)) {
-                continue;
+        enterDepth(peek());
+        try {
+            expect(TokenType.NEWLINE, "end of line after ':'");
+            expect(TokenType.INDENT, "an indented block");
+            List<Ast.Stmt> body = new ArrayList<>();
+            while (!check(TokenType.DEDENT) && !check(TokenType.EOF)) {
+                if (match(TokenType.NEWLINE)) {
+                    continue;
+                }
+                body.add(parseStatement());
             }
-            body.add(parseStatement());
+            expect(TokenType.DEDENT, "end of indented block");
+            return body;
+        } finally {
+            depth--;
         }
-        expect(TokenType.DEDENT, "end of indented block");
-        return body;
     }
 
     private Ast.Expr parseExpression() throws ScriptCompileException {
@@ -246,8 +261,13 @@ final class Parser {
     private Ast.Expr parseNot() throws ScriptCompileException {
         if (checkName("not")) {
             Token token = advance();
-            Ast.Expr operand = parseNot();
-            return new Ast.Unary(Ast.UnaryOp.NOT, operand, token.line, token.column);
+            enterDepth(token);
+            try {
+                Ast.Expr operand = parseNot();
+                return new Ast.Unary(Ast.UnaryOp.NOT, operand, token.line, token.column);
+            } finally {
+                depth--;
+            }
         }
         return parseComparison();
     }
@@ -321,10 +341,20 @@ final class Parser {
     private Ast.Expr parseFactor() throws ScriptCompileException {
         Token token = peek();
         if (match(TokenType.MINUS)) {
-            return new Ast.Unary(Ast.UnaryOp.NEG, parseFactor(), token.line, token.column);
+            enterDepth(token);
+            try {
+                return new Ast.Unary(Ast.UnaryOp.NEG, parseFactor(), token.line, token.column);
+            } finally {
+                depth--;
+            }
         }
         if (match(TokenType.PLUS)) {
-            return new Ast.Unary(Ast.UnaryOp.POS, parseFactor(), token.line, token.column);
+            enterDepth(token);
+            try {
+                return new Ast.Unary(Ast.UnaryOp.POS, parseFactor(), token.line, token.column);
+            } finally {
+                depth--;
+            }
         }
         return parsePower();
     }
@@ -332,8 +362,13 @@ final class Parser {
     private Ast.Expr parsePower() throws ScriptCompileException {
         Ast.Expr base = parsePostfix();
         if (match(TokenType.DOUBLE_STAR)) {
-            Ast.Expr exponent = parseFactor();
-            return new Ast.Binary(Ast.BinOp.POW, base, exponent, base.line(), base.column());
+            enterDepth(peek());
+            try {
+                Ast.Expr exponent = parseFactor();
+                return new Ast.Binary(Ast.BinOp.POW, base, exponent, base.line(), base.column());
+            } finally {
+                depth--;
+            }
         }
         return base;
     }
@@ -342,24 +377,34 @@ final class Parser {
         Ast.Expr expr = parsePrimary();
         while (true) {
             if (match(TokenType.LPAREN)) {
-                List<Ast.Expr> args = new ArrayList<>();
-                if (!check(TokenType.RPAREN)) {
-                    while (true) {
-                        args.add(parseExpression());
-                        if (!match(TokenType.COMMA)) {
-                            break;
-                        }
-                        if (check(TokenType.RPAREN)) {
-                            break;
+                enterDepth(peek());
+                try {
+                    List<Ast.Expr> args = new ArrayList<>();
+                    if (!check(TokenType.RPAREN)) {
+                        while (true) {
+                            args.add(parseExpression());
+                            if (!match(TokenType.COMMA)) {
+                                break;
+                            }
+                            if (check(TokenType.RPAREN)) {
+                                break;
+                            }
                         }
                     }
+                    expect(TokenType.RPAREN, "')' after arguments");
+                    expr = new Ast.Call(expr, args, expr.line(), expr.column());
+                } finally {
+                    depth--;
                 }
-                expect(TokenType.RPAREN, "')' after arguments");
-                expr = new Ast.Call(expr, args, expr.line(), expr.column());
             } else if (match(TokenType.LBRACKET)) {
-                Ast.Expr indexExpr = parseExpression();
-                expect(TokenType.RBRACKET, "']' after index");
-                expr = new Ast.Index(expr, indexExpr, expr.line(), expr.column());
+                enterDepth(peek());
+                try {
+                    Ast.Expr indexExpr = parseExpression();
+                    expect(TokenType.RBRACKET, "']' after index");
+                    expr = new Ast.Index(expr, indexExpr, expr.line(), expr.column());
+                } finally {
+                    depth--;
+                }
             } else if (match(TokenType.DOT)) {
                 Token name = expect(TokenType.NAME, "an attribute name");
                 expr = new Ast.Attr(expr, name.text, expr.line(), expr.column());
@@ -396,9 +441,14 @@ final class Parser {
             }
             case LPAREN: {
                 advance();
-                Ast.Expr expr = parseExpression();
-                expect(TokenType.RPAREN, "')'");
-                return expr;
+                enterDepth(token);
+                try {
+                    Ast.Expr expr = parseExpression();
+                    expect(TokenType.RPAREN, "')'");
+                    return expr;
+                } finally {
+                    depth--;
+                }
             }
             case LBRACKET:
                 return parseListLiteral();
@@ -411,41 +461,51 @@ final class Parser {
 
     private Ast.Expr parseListLiteral() throws ScriptCompileException {
         Token start = advance();
-        List<Ast.Expr> elements = new ArrayList<>();
-        if (!check(TokenType.RBRACKET)) {
-            while (true) {
-                elements.add(parseExpression());
-                if (!match(TokenType.COMMA)) {
-                    break;
-                }
-                if (check(TokenType.RBRACKET)) {
-                    break;
+        enterDepth(start);
+        try {
+            List<Ast.Expr> elements = new ArrayList<>();
+            if (!check(TokenType.RBRACKET)) {
+                while (true) {
+                    elements.add(parseExpression());
+                    if (!match(TokenType.COMMA)) {
+                        break;
+                    }
+                    if (check(TokenType.RBRACKET)) {
+                        break;
+                    }
                 }
             }
+            expect(TokenType.RBRACKET, "']' after list literal");
+            return new Ast.ListExpr(elements, start.line, start.column);
+        } finally {
+            depth--;
         }
-        expect(TokenType.RBRACKET, "']' after list literal");
-        return new Ast.ListExpr(elements, start.line, start.column);
     }
 
     private Ast.Expr parseDictLiteral() throws ScriptCompileException {
         Token start = advance();
-        List<Ast.Expr> keys = new ArrayList<>();
-        List<Ast.Expr> values = new ArrayList<>();
-        if (!check(TokenType.RBRACE)) {
-            while (true) {
-                keys.add(parseExpression());
-                expect(TokenType.COLON, "':' after dictionary key");
-                values.add(parseExpression());
-                if (!match(TokenType.COMMA)) {
-                    break;
-                }
-                if (check(TokenType.RBRACE)) {
-                    break;
+        enterDepth(start);
+        try {
+            List<Ast.Expr> keys = new ArrayList<>();
+            List<Ast.Expr> values = new ArrayList<>();
+            if (!check(TokenType.RBRACE)) {
+                while (true) {
+                    keys.add(parseExpression());
+                    expect(TokenType.COLON, "':' after dictionary key");
+                    values.add(parseExpression());
+                    if (!match(TokenType.COMMA)) {
+                        break;
+                    }
+                    if (check(TokenType.RBRACE)) {
+                        break;
+                    }
                 }
             }
+            expect(TokenType.RBRACE, "'}' after dictionary literal");
+            return new Ast.DictExpr(keys, values, start.line, start.column);
+        } finally {
+            depth--;
         }
-        expect(TokenType.RBRACE, "'}' after dictionary literal");
-        return new Ast.DictExpr(keys, values, start.line, start.column);
     }
 
     private boolean check(TokenType type) {

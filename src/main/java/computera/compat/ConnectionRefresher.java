@@ -47,6 +47,14 @@ public final class ConnectionRefresher {
         QUEUE.add(new Pending(level, event.getChunk().getPos()));
     }
 
+    public static void onLevelUnload(ServerLevel level) {
+        QUEUE.removeIf(pending -> pending.level() == level);
+    }
+
+    public static void clearAll() {
+        QUEUE.clear();
+    }
+
     public static void onServerTick(ServerTickEvent.Post event) {
         int budget = PER_TICK;
         while (budget-- > 0 && !QUEUE.isEmpty()) {

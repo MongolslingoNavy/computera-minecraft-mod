@@ -41,7 +41,8 @@ public final class TerminalClientHandler {
 
     public static void handleLogistics(LogisticsStatePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> Minecraft.getInstance().setScreen(
-                new LogisticsScreen(payload.pos(), payload.devices(), payload.carried())));
+                new LogisticsScreen(payload.pos(), payload.devices(), payload.selectedKey(),
+                        payload.page(), payload.slots(), payload.carried())));
     }
 
     public static void handleDisplay(computera.net.DisplayStatePayload payload, IPayloadContext context) {

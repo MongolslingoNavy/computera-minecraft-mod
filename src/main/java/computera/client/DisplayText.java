@@ -20,8 +20,54 @@ public final class DisplayText {
         return switch (mode) {
             case ITEMS -> formatItems(items);
             case DEVICES -> formatDevices(devices, compact);
-            default -> lines;
+            default -> formatOverview(lines);
         };
+    }
+
+    private static List<String> formatOverview(List<String> raw) {
+        List<String> out = new ArrayList<>();
+        for (String line : raw) {
+            if (line == null || line.isEmpty()) {
+                continue;
+            }
+            if (!line.startsWith("@")) {
+                out.add(line);
+                continue;
+            }
+            String[] parts = line.substring(1).split("\\|", -1);
+            String kind = parts[0];
+            switch (kind) {
+                case "title" -> out.add(label("computera.gui.display.overview.title"));
+                case "offline" -> out.add(label("computera.gui.display.overview.offline"));
+                case "items" -> {
+                    if (parts.length >= 3) {
+                        out.add(Component.translatable("computera.gui.display.overview.items", parts[1], parts[2]).getString());
+                    }
+                }
+                case "containers" -> {
+                    if (parts.length >= 3) {
+                        out.add(Component.translatable("computera.gui.display.overview.containers", parts[1], parts[2]).getString());
+                    }
+                }
+                case "cabinets" -> {
+                    if (parts.length >= 3) {
+                        out.add(Component.translatable("computera.gui.display.overview.cabinets", parts[1], parts[2]).getString());
+                    }
+                }
+                case "threads" -> {
+                    if (parts.length >= 3) {
+                        out.add(Component.translatable("computera.gui.display.overview.threads", parts[1], parts[2]).getString());
+                    }
+                }
+                case "energy" -> {
+                    if (parts.length >= 2) {
+                        out.add(Component.translatable("computera.gui.display.overview.energy", parts[1]).getString());
+                    }
+                }
+                default -> out.add(line);
+            }
+        }
+        return out;
     }
 
     private static List<String> formatItems(List<String> entries) {
@@ -50,9 +96,9 @@ public final class DisplayText {
             String alias = parts[1];
             String count = parts[2];
             String status = switch (parts[3]) {
-                case "run" -> compact ? "运" : label("computera.gui.display.status.run");
-                case "full" -> compact ? "有" : label("computera.gui.display.status.full");
-                default -> compact ? "空" : label("computera.gui.display.status.idle");
+                case "run" -> label(compact ? "computera.gui.display.status.compact.run" : "computera.gui.display.status.run");
+                case "full" -> label(compact ? "computera.gui.display.status.compact.full" : "computera.gui.display.status.full");
+                default -> label(compact ? "computera.gui.display.status.compact.idle" : "computera.gui.display.status.idle");
             };
             String name = alias.equals(key) ? localizeBlock(parts[4], key) : alias;
             out.add(name + " " + count + " " + status);

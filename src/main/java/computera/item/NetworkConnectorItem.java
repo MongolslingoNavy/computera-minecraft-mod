@@ -53,7 +53,32 @@ public class NetworkConnectorItem extends Item {
             return InteractionResult.SUCCESS;
         }
         if (level.getBlockEntity(hubPos) instanceof CabinetBlockEntity cabinet) {
-            cabinet.addWireless(clicked);
+            if (context.getPlayer() != null && context.getPlayer().isShiftKeyDown()) {
+                if (cabinet.removeWireless(clicked)) {
+                    if (context.getPlayer() != null) {
+                        context.getPlayer().sendSystemMessage(Component.translatable(
+                                "computera.msg.wireless_unlinked", clicked.toShortString(), hubPos.toShortString()));
+                    }
+                    return InteractionResult.SUCCESS;
+                }
+            }
+            net.minecraft.core.Direction clickedFace = context.getClickedFace();
+            net.minecraft.core.Direction accessFace = null;
+            if (level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, clicked, clickedFace) != null) {
+                accessFace = clickedFace;
+            } else if (level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, clicked, null) == null) {
+                if (context.getPlayer() != null) {
+                    context.getPlayer().sendSystemMessage(Component.translatable("computera.msg.wireless_not_container"));
+                }
+                return InteractionResult.SUCCESS;
+            }
+            if (!cabinet.addWireless(clicked, accessFace)) {
+                if (context.getPlayer() != null) {
+                    context.getPlayer().sendSystemMessage(Component.translatable(
+                            "computera.msg.wireless_full", CabinetBlockEntity.MAX_WIRELESS));
+                }
+                return InteractionResult.SUCCESS;
+            }
             message(context, "linked " + clicked.toShortString() + " to hub " + hubPos.toShortString());
         } else {
             message(context, "hub cabinet is gone, set a new hub");

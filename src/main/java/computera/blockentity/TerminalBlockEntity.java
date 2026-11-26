@@ -39,23 +39,29 @@ import java.util.UUID;
 
 public class TerminalBlockEntity extends BlockEntity {
     public static final int MAX_OUTPUT_LINES = 200;
+    public static final int MAX_OUTPUT_LINE_LEN = 512;
+    public static final int MAX_PENDING_PER_TICK = 64;
     public static final int TICK_BUDGET = 200_000;
 
     public static final int LINES_PER_TAPE = 8192;
+
+    private record LogisticsSelection(String key, int page) {
+    }
 
     private final List<String> output = new ArrayList<>();
     private final List<String> pendingOutput = new ArrayList<>();
     private int tapeLines;
 
     private final Map<UUID, BlockPos> sessionOrigins = new java.util.HashMap<>();
+    private final Map<UUID, String> editingFiles = new java.util.HashMap<>();
+    private final Map<UUID, LogisticsSelection> logisticsSelections = new java.util.HashMap<>();
 
     @Nullable
     private ScriptVM vm;
     @Nullable
     private String runningFile;
     @Nullable
-    private String editingFile;
-    @Nullable
+    private String lastEditingFile;
     private final java.util.Set<UUID> viewers = new java.util.LinkedHashSet<>();
 
     public TerminalBlockEntity(BlockPos pos, BlockState state) {
@@ -88,7 +94,18 @@ public class TerminalBlockEntity extends BlockEntity {
 
     @Nullable
     public String editingFile() {
-        return editingFile;
+        return lastEditingFile;
+    }
+
+    @Nullable
+    public String editingFile(Player player) {
+        if (player != null) {
+            String owned = editingFiles.get(player.getUUID());
+            if (owned != null && !owned.isEmpty()) {
+                return owned;
+            }
+        }
+        return lastEditingFile;
     }
 
     @Nullable
@@ -97,11 +114,16 @@ public class TerminalBlockEntity extends BlockEntity {
         return file == null ? null : file.source();
     }
 
-    public void saveFileFromCard(String name, String source) {
+    public boolean saveFileFromCard(String name, String source) {
         CabinetBlockEntity cabinet = primaryCabinet(cluster());
-        if (cabinet != null) {
-            cabinet.putFile(name, source);
+        return cabinet != null && cabinet.putFile(name, source);
+    }
+
+    private static String clampLine(String line) {
+        if (line == null) {
+            return "";
         }
+        return line.length() > MAX_OUTPUT_LINE_LEN ? line.substring(0, MAX_OUTPUT_LINE_LEN) + "..." : line;
     }
 
     public void print(String line) {
@@ -115,7 +137,7 @@ public class TerminalBlockEntity extends BlockEntity {
             tapeLines--;
             setChanged();
         }
-        output.add(line);
+        output.add(clampLine(line));
         while (output.size() > MAX_OUTPUT_LINES) {
             output.removeFirst();
         }
@@ -128,6 +150,7 @@ public class TerminalBlockEntity extends BlockEntity {
 
     public void beginSession(Player player, BlockPos origin) {
         if (!(player instanceof ServerPlayer serverPlayer) || player.level() != level
+                || !level.hasChunkAt(origin)
                 || player.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(origin)) > 64.0) {
             return;
         }
@@ -135,6 +158,9 @@ public class TerminalBlockEntity extends BlockEntity {
         int capacity = cluster == null ? 0 : cluster.threadCapacity();
         if (capacity <= 0) {
             serverPlayer.sendSystemMessage(Component.literal("[Computera] no compute card installed"));
+            return;
+        }
+        if (!isValidOrigin(origin, cluster)) {
             return;
         }
         if (!cluster.canAdmitTerminal()) {
@@ -153,6 +179,20 @@ public class TerminalBlockEntity extends BlockEntity {
         viewers.add(serverPlayer.getUUID());
         sessionOrigins.put(serverPlayer.getUUID(), origin.immutable());
         sendState(serverPlayer);
+    }
+
+    private boolean isValidOrigin(BlockPos origin, @Nullable Cluster cluster) {
+        if (origin.equals(worldPosition)) {
+            return true;
+        }
+        if (cluster == null || level == null || !level.hasChunkAt(origin)) {
+            return false;
+        }
+        if (level.getBlockEntity(origin) instanceof DisplayPanelBlockEntity panel) {
+            Cluster panelCluster = panel.linkedCluster();
+            return panelCluster != null && panelCluster.blocks().contains(worldPosition);
+        }
+        return false;
     }
 
     public void sendState(ServerPlayer player) {
@@ -176,14 +216,31 @@ public class TerminalBlockEntity extends BlockEntity {
 
     public boolean canAccess(ServerPlayer player) {
         BlockPos origin = sessionOrigins.get(player.getUUID());
-        return !isRemoved() && player.isAlive() && player.level() == level && origin != null
-                && level.getBlockEntity(origin) != null
-                && player.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(origin)) <= 64.0;
+        if (isRemoved() || !player.isAlive() || player.level() != level || origin == null
+                || !level.hasChunkAt(origin)
+                || player.distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(origin)) > 64.0) {
+            return false;
+        }
+        Cluster cluster = cluster();
+        return cluster != null && cluster.threadCapacity() > 0 && isValidOrigin(origin, cluster);
     }
 
     public void handleAction(ServerPlayer player, String action, String name, String data) {
+        if ("close".equals(action)) {
+            releaseViewer(player);
+            return;
+        }
         if (!canAccess(player)) {
             releaseViewer(player);
+            return;
+        }
+        Cluster cluster = cluster();
+        if (kind().usesPower() && !hasPower(cluster)) {
+            respond(player, "[Computera] no power");
+            return;
+        }
+        if (kind().usesPaperTape() && tapeLines <= 0) {
+            respond(player, "[Computera] out of paper tape");
             return;
         }
         switch (action) {
@@ -192,6 +249,7 @@ public class TerminalBlockEntity extends BlockEntity {
             case "save" -> saveFile(player, name, data);
             case "open" -> openFile(player, name);
             case "logi" -> sendLogisticsState(player);
+            case "logi_select" -> logisticsSelect(player, name, data);
             case "logi_take" -> logisticsTake(player, name, data);
             case "logi_put" -> logisticsPut(player, name, data);
             case "logi_move" -> logisticsMove(player, name, data);
@@ -210,9 +268,26 @@ public class TerminalBlockEntity extends BlockEntity {
             case "auto_toggle" -> automationToggle(player, name);
             case "display_list" -> sendDisplayList(player);
             case "display_mode" -> setDisplayMode(player, name, data);
-            case "close" -> releaseViewer(player);
             default -> respond(player, "[Computera] unknown action: " + action);
         }
+    }
+
+    @Override
+    public void setRemoved() {
+        if (level instanceof ServerLevel serverLevel && !viewers.isEmpty()) {
+            var playerList = serverLevel.getServer().getPlayerList();
+            for (UUID id : List.copyOf(viewers)) {
+                ServerPlayer player = playerList.getPlayer(id);
+                if (player != null) {
+                    returnCarried(player);
+                }
+            }
+        }
+        viewers.clear();
+        sessionOrigins.clear();
+        logisticsSelections.clear();
+        editingFiles.clear();
+        super.setRemoved();
     }
 
     public void handleCommand(ServerPlayer player, String raw) {
@@ -283,7 +358,8 @@ public class TerminalBlockEntity extends BlockEntity {
                     respond(player, "usage: edit <file>");
                     return;
                 }
-                editingFile = argument;
+                editingFiles.put(player.getUUID(), argument);
+                lastEditingFile = argument;
                 ResolvedFile resolved = resolveFile(argument);
                 String source = resolved == null ? null : resolved.source();
                 PacketDistributor.sendToPlayer(player, new TerminalFilePayload(
@@ -371,10 +447,10 @@ public class TerminalBlockEntity extends BlockEntity {
         }
 
         Map<String, Device> devices = level instanceof ServerLevel serverLevel
-                ? new java.util.HashMap<>(DeviceRegistry.scan(serverLevel, cluster))
+                ? new java.util.HashMap<>(DeviceRegistry.scan(serverLevel, worldPosition, cluster))
                 : new java.util.HashMap<String, Device>();
         if (level instanceof ServerLevel serverLevel && cluster != null) {
-            devices.put("logistics", new computera.logistics.LogisticsDevice(serverLevel, cluster));
+            devices.put("logistics", new computera.logistics.LogisticsDevice(serverLevel, worldPosition));
         }
         vm = new ScriptVM(program, new TerminalHost(devices));
         runningFile = name;
@@ -466,6 +542,7 @@ public class TerminalBlockEntity extends BlockEntity {
                     returnCarried(player);
                 }
                 sessionOrigins.remove(id);
+                logisticsSelections.remove(id);
                 iterator.remove();
             } else {
                 list.add(player);
@@ -484,7 +561,13 @@ public class TerminalBlockEntity extends BlockEntity {
             respond(player, "no cabinet in this cluster");
             return;
         }
-        editingFile = name;
+        String text = source == null ? "" : source;
+        if (name.length() > CabinetBlockEntity.MAX_FILE_NAME || text.length() > CabinetBlockEntity.MAX_FILE_SIZE) {
+            respond(player, "file name or content too large (max " + CabinetBlockEntity.MAX_FILE_SIZE + " bytes)");
+            return;
+        }
+        editingFiles.put(player.getUUID(), name);
+        lastEditingFile = name;
         ResolvedFile resolved = resolveFile(name);
         if (resolved == null && (name.startsWith("hd1:") || name.startsWith("hd2:"))) {
             respond(player, "drive is missing");
@@ -492,19 +575,25 @@ public class TerminalBlockEntity extends BlockEntity {
         }
         if (resolved != null && resolved.drive() >= 0) {
             ItemStack stack = cabinet.drive(resolved.drive());
-            if (stack.isEmpty() || !ProgramItems.store(stack, resolved.name(), source == null ? "" : source)) {
+            if (stack.isEmpty() || !ProgramItems.store(stack, resolved.name(), text)) {
                 respond(player, "drive is missing or full");
                 return;
             }
             cabinet.setDrive(resolved.drive(), stack);
         } else {
-            cabinet.putFile(name, source == null ? "" : source);
+            if (!cabinet.putFile(name, text)) {
+                respond(player, "cabinet storage full (max " + CabinetBlockEntity.MAX_FILES + " files)");
+                return;
+            }
         }
-        respond(player, "saved " + name + " (" + (source == null ? 0 : source.length()) + " bytes)");
+        respond(player, "saved " + name + " (" + text.length() + " bytes)");
     }
 
     private void openFile(ServerPlayer player, String name) {
-        editingFile = name;
+        if (name != null && !name.isBlank()) {
+            editingFiles.put(player.getUUID(), name);
+            lastEditingFile = name;
+        }
         ResolvedFile resolved = resolveFile(name);
         String source = resolved == null ? "" : (resolved.source() == null ? "" : resolved.source());
         PacketDistributor.sendToPlayer(player, new TerminalFilePayload(worldPosition, name, source));
@@ -703,7 +792,10 @@ public class TerminalBlockEntity extends BlockEntity {
             respond(player, "no cabinet in this cluster");
             return;
         }
-        cabinet.putFile(name, source);
+        if (!cabinet.putFile(name, source)) {
+            respond(player, "cabinet storage full or file too large");
+            return;
+        }
         respond(player, "imported " + name + " (" + source.length() + " bytes)");
     }
 
@@ -723,46 +815,74 @@ public class TerminalBlockEntity extends BlockEntity {
         }
     }
 
+    private void logisticsSelect(ServerPlayer player, String deviceKey, String pageText) {
+        int page = 0;
+        Integer parsed = parseInt(pageText);
+        if (parsed != null && parsed >= 0) {
+            page = parsed;
+        }
+        logisticsSelections.put(player.getUUID(), new LogisticsSelection(deviceKey == null ? "" : deviceKey, page));
+        sendLogisticsState(player);
+    }
+
     public void sendLogisticsState(ServerPlayer player) {
         Cluster cluster = cluster();
         if (cluster == null || !(level instanceof ServerLevel serverLevel)) {
             respond(player, "no cabinet in this cluster");
             return;
         }
-        var positions = computera.device.DeviceRegistry.positions(serverLevel, cluster);
-        var lines = new java.util.ArrayList<String>();
-        for (var entry : positions.entrySet()) {
-            var handler = serverLevel.getCapability(
-                    net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, entry.getValue(), null);
+        var entries = DeviceRegistry.entries(serverLevel, cluster);
+        CabinetBlockEntity cabinet = primaryCabinet(cluster);
+        var deviceMeta = new java.util.ArrayList<String>();
+        var activeHandlers = new java.util.LinkedHashMap<String,
+                net.neoforged.neoforge.transfer.ResourceHandler<ItemResource>>();
+        for (var entry : entries.values()) {
+            if (entry.fluid()) {
+                continue;
+            }
+            var handler = DeviceRegistry.itemHandler(serverLevel, entry);
             if (handler == null) {
                 continue;
             }
-            CabinetBlockEntity cabinet = primaryCabinet(cluster);
-            StringBuilder sb = new StringBuilder();
-            sb.append(entry.getKey()).append('|')
-                    .append(cabinet == null ? entry.getKey() : cabinet.alias(entry.getKey())).append('|')
-                    .append(cabinet == null ? "" : cabinet.group(entry.getKey())).append('|')
-                    .append(entry.getValue().toShortString()).append('|');
-            for (int slot = 0; slot < handler.size(); slot++) {
-                if (slot > 0) {
-                    sb.append(',');
-                }
+            activeHandlers.put(entry.key(), handler);
+            deviceMeta.add(entry.key() + '|'
+                    + (cabinet == null ? entry.key() : cabinet.alias(entry.key())) + '|'
+                    + (cabinet == null ? "" : cabinet.group(entry.key())) + '|'
+                    + entry.pos().toShortString() + '|'
+                    + handler.size());
+        }
+        LogisticsSelection selection = logisticsSelections.get(player.getUUID());
+        String selectedKey = selection != null && activeHandlers.containsKey(selection.key())
+                ? selection.key()
+                : (activeHandlers.isEmpty() ? "" : activeHandlers.keySet().iterator().next());
+        int page = selection != null && selectedKey.equals(selection.key()) ? Math.max(0, selection.page()) : 0;
+        var pageSlots = new java.util.ArrayList<String>();
+        if (!selectedKey.isEmpty()) {
+            var handler = activeHandlers.get(selectedKey);
+            int totalSlots = handler.size();
+            int pageSize = 27;
+            int maxPage = Math.max(0, (totalSlots - 1) / pageSize);
+            page = Math.min(page, maxPage);
+            int start = page * pageSize;
+            int end = Math.min(totalSlots, start + pageSize);
+            for (int slot = start; slot < end; slot++) {
                 var resource = handler.getResource(slot);
                 if (resource.isEmpty()) {
-                    sb.append('-');
+                    pageSlots.add("-");
                 } else {
                     var stack = resource.toStack(1);
-                    sb.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()))
-                            .append('=').append(handler.getAmountAsLong(slot));
+                    pageSlots.add(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem())
+                            + "=" + handler.getAmountAsLong(slot));
                 }
             }
-            lines.add(sb.toString());
+            logisticsSelections.put(player.getUUID(), new LogisticsSelection(selectedKey, page));
         }
         ItemStack carried = player.inventoryMenu.getCarried();
         String carriedText = carried.isEmpty() ? ""
                 : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(carried.getItem()) + "=" + carried.getCount();
         PacketDistributor.sendToPlayer(player,
-                new computera.net.LogisticsStatePayload(worldPosition, lines, carriedText));
+                new computera.net.LogisticsStatePayload(
+                        worldPosition, deviceMeta, selectedKey, page, pageSlots, carriedText));
     }
 
     private void logisticsTake(ServerPlayer player, String device, String slotText) {
@@ -777,7 +897,8 @@ public class TerminalBlockEntity extends BlockEntity {
             respond(player, "slot is empty");
             return;
         }
-        int amount = (int) Math.min(handler.getAmountAsLong(slot), 64);
+        int maxStack = Math.max(1, resource.toStack(1).getMaxStackSize());
+        int amount = (int) Math.min(handler.getAmountAsLong(slot), maxStack);
         int taken;
         try (Transaction transaction = Transaction.openRoot()) {
             taken = handler.extract(slot, resource, amount, transaction);
@@ -898,7 +1019,7 @@ public class TerminalBlockEntity extends BlockEntity {
         }
         if ("player".equals(device)) {
             var inventory = player.getInventory();
-            if (slot < 0 || slot >= inventory.getContainerSize()) {
+            if (slot < 0 || slot >= 36) {
                 return;
             }
             ItemStack stack = inventory.getItem(slot);
@@ -912,54 +1033,27 @@ public class TerminalBlockEntity extends BlockEntity {
             sendLogisticsState(player);
             return;
         }
-        Cluster cluster = cluster();
-        if (cluster == null || !(level instanceof ServerLevel serverLevel)) {
+        var handler = logisticsHandler(device);
+        if (handler == null || slot < 0 || slot >= handler.size()) {
+            sendLogisticsState(player);
             return;
         }
-        int amount = 64;
-        if (half) {
-            var handler = logisticsHandler(device);
-            if (handler == null || slot < 0 || slot >= handler.size()) {
-                return;
-            }
-            amount = (int) ((Math.min(handler.getAmountAsLong(slot), 64) + 1) / 2);
-        }
-        ItemStack takenStack = logisticsExtract(serverLevel, cluster, device, slot, amount);
-        if (!takenStack.isEmpty()) {
-            player.inventoryMenu.setCarried(takenStack);
-        }
-        sendLogisticsState(player);
-    }
-
-    private ItemStack logisticsExtract(ServerLevel level, Cluster cluster, String device, int slot, int amount) {
-        var pos = computera.device.DeviceRegistry.positions(level, cluster).get(device);
-        if (pos == null) {
-            return ItemStack.EMPTY;
-        }
-        net.minecraft.core.Direction[] sides = new net.minecraft.core.Direction[]{
-                null, net.minecraft.core.Direction.DOWN, net.minecraft.core.Direction.UP,
-                net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.SOUTH,
-                net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.WEST};
-        for (net.minecraft.core.Direction side : sides) {
-            var handler = level.getCapability(
-                    net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, pos, side);
-            if (handler == null || slot < 0 || slot >= handler.size()) {
-                continue;
-            }
-            var resource = handler.getResource(slot);
-            if (resource.isEmpty()) {
-                continue;
-            }
-            int want = Math.min(amount, (int) Math.min(handler.getAmountAsLong(slot), Integer.MAX_VALUE));
-            try (Transaction transaction = Transaction.openRoot()) {
-                int taken = handler.extract(slot, resource, want, transaction);
-                if (taken > 0) {
-                    transaction.commit();
-                    return resource.toStack(taken);
+        var resource = handler.getResource(slot);
+        if (!resource.isEmpty()) {
+            int maxStack = Math.max(1, resource.toStack(1).getMaxStackSize());
+            int available = (int) Math.min(handler.getAmountAsLong(slot), maxStack);
+            int want = half ? (available + 1) / 2 : available;
+            if (want > 0) {
+                try (Transaction transaction = Transaction.openRoot()) {
+                    int taken = handler.extract(slot, resource, want, transaction);
+                    if (taken > 0) {
+                        transaction.commit();
+                        player.inventoryMenu.setCarried(resource.toStack(taken));
+                    }
                 }
             }
         }
-        return ItemStack.EMPTY;
+        sendLogisticsState(player);
     }
 
     private void logisticsDrop(ServerPlayer player, String target, String slotText) {
@@ -977,7 +1071,7 @@ public class TerminalBlockEntity extends BlockEntity {
         int amount = one ? 1 : carried.getCount();
         if ("player".equals(target)) {
             var inventory = player.getInventory();
-            if (slot < 0 || slot >= inventory.getContainerSize()) {
+            if (slot < 0 || slot >= 36) {
                 return;
             }
             ItemStack existing = inventory.getItem(slot);
@@ -1034,38 +1128,49 @@ public class TerminalBlockEntity extends BlockEntity {
     }
 
     private void logisticsDistribute(ServerPlayer player, String spec, String slotText) {
-        String[] devices = spec.split(",");
+        String sourceKey;
+        String targetSpec;
+        int sep = spec.indexOf('|');
+        if (sep >= 0) {
+            sourceKey = spec.substring(0, sep);
+            targetSpec = spec.substring(sep + 1);
+        } else {
+            String[] legacy = spec.split(",");
+            sourceKey = legacy.length > 0 ? legacy[0] : "";
+            targetSpec = spec;
+        }
+        String[] devices = targetSpec.split(",");
         Integer slot = parseInt(slotText);
-        if (devices.length == 0 || slot == null) {
+        if (sourceKey.isEmpty() || devices.length == 0 || slot == null) {
             return;
         }
-        Cluster cluster = cluster();
-        if (cluster == null || !(level instanceof ServerLevel serverLevel)) {
+        var source = logisticsHandler(sourceKey);
+        if (source == null || slot < 0 || slot >= source.size()) {
             return;
         }
-        var first = logisticsHandler(devices[0]);
-        if (first == null || slot < 0 || slot >= first.size()) {
-            return;
-        }
-        var resource = first.getResource(slot);
+        var resource = source.getResource(slot);
         if (resource.isEmpty()) {
             return;
         }
-        int total = (int) Math.min(first.getAmountAsLong(slot), 64);
+        int maxStack = Math.max(1, resource.toStack(1).getMaxStackSize());
+        int total = (int) Math.min(source.getAmountAsLong(slot), maxStack);
         int per = Math.max(1, total / devices.length);
         int remaining = total;
         try (Transaction transaction = Transaction.openRoot()) {
-            int extracted = first.extract(slot, resource, total, transaction);
+            int extracted = source.extract(slot, resource, total, transaction);
             if (extracted != total) {
                 return;
             }
             for (String device : devices) {
+                if (device.isEmpty()) {
+                    continue;
+                }
                 var handler = logisticsHandler(device);
                 if (handler != null && remaining > 0) {
                     remaining -= handler.insert(resource, Math.min(per, remaining), transaction);
                 }
             }
-            if (remaining == 0 || first.insert(slot, resource, remaining, transaction) == remaining) {
+            if (remaining == 0 || source.insert(slot, resource, remaining, transaction) == remaining) {
                 transaction.commit();
             }
         }
@@ -1117,9 +1222,16 @@ public class TerminalBlockEntity extends BlockEntity {
                 }
             }
         }
+        int maxStack = Math.max(1, template.getMaxStackSize());
         for (ItemStack stack : buffer) {
-            if (!stack.isEmpty() && !player.getInventory().add(stack)) {
-                player.drop(stack, false);
+            int leftover = stack.getCount();
+            while (leftover > 0) {
+                int chunk = Math.min(leftover, maxStack);
+                ItemStack piece = stack.copyWithCount(chunk);
+                if (!player.getInventory().add(piece)) {
+                    player.drop(piece, false);
+                }
+                leftover -= chunk;
             }
         }
         sendLogisticsState(player);
@@ -1129,10 +1241,11 @@ public class TerminalBlockEntity extends BlockEntity {
     private int sourceForGive(ServerPlayer player, ItemStack template, ItemResource resource,
                               int need, java.util.List<ItemStack> buffer) {
         int got = 0;
+        int maxStack = Math.max(1, template.getMaxStackSize());
         ItemStack carried = player.inventoryMenu.getCarried();
         if (carried != null && !carried.isEmpty() && ItemStack.isSameItemSameComponents(carried, template)) {
             int take = Math.min(need, carried.getCount());
-            buffer.add(template.copyWithCount(take));
+            addSplitToBuffer(buffer, template, take, maxStack);
             carried.shrink(take);
             got += take;
             if (carried.isEmpty()) {
@@ -1147,7 +1260,7 @@ public class TerminalBlockEntity extends BlockEntity {
             }
             int take = Math.min(need - got, stack.getCount());
             stack.shrink(take);
-            buffer.add(template.copyWithCount(take));
+            addSplitToBuffer(buffer, template, take, maxStack);
             got += take;
         }
         Cluster cluster = cluster();
@@ -1160,9 +1273,12 @@ public class TerminalBlockEntity extends BlockEntity {
                 if (got >= need) {
                     break;
                 }
+                if (!serverLevel.hasChunkAt(entry.pos())) {
+                    continue;
+                }
                 var handler = serverLevel.getCapability(
-                        net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, entry.pos(), null);
-                if (handler == null) {
+                        net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, entry.pos(), entry.accessSide());
+                if (handler == null || entry.slot() < 0 || entry.slot() >= handler.size()) {
                     continue;
                 }
                 int want = Math.min(need - got, (int) Math.min(entry.count(), Integer.MAX_VALUE));
@@ -1172,13 +1288,22 @@ public class TerminalBlockEntity extends BlockEntity {
                     transaction.commit();
                 }
                 if (extracted > 0) {
-                    buffer.add(template.copyWithCount(extracted));
+                    addSplitToBuffer(buffer, template, extracted, maxStack);
                     got += extracted;
                 }
             }
         }
         inventory.setChanged();
         return got;
+    }
+
+    private static void addSplitToBuffer(java.util.List<ItemStack> buffer, ItemStack template, int count, int maxStack) {
+        int remaining = count;
+        while (remaining > 0) {
+            int chunk = Math.min(remaining, maxStack);
+            buffer.add(template.copyWithCount(chunk));
+            remaining -= chunk;
+        }
     }
 
     private static ItemStack itemStackById(String id) {
@@ -1201,30 +1326,32 @@ public class TerminalBlockEntity extends BlockEntity {
             return;
         }
         java.util.List<String> walls = new java.util.ArrayList<>();
-        java.util.Set<BlockPos> seen = new java.util.HashSet<>();
-        scanWalls(serverLevel, cluster.blocks(), seen, walls);
-        scanWalls(serverLevel, cluster.terminals(), seen, walls);
-        scanWalls(serverLevel, cluster.ports(), seen, walls);
+        java.util.Set<BlockPos> seenControllers = new java.util.HashSet<>();
+        scanWalls(serverLevel, cluster.blocks(), seenControllers, walls);
+        scanWalls(serverLevel, cluster.terminals(), seenControllers, walls);
+        scanWalls(serverLevel, cluster.ports(), seenControllers, walls);
         PacketDistributor.sendToPlayer(player, new computera.net.DisplayListPayload(worldPosition, walls));
     }
 
     private void scanWalls(ServerLevel serverLevel, java.util.Collection<BlockPos> anchors,
-                           java.util.Set<BlockPos> seen, java.util.List<String> out) {
+                           java.util.Set<BlockPos> seenControllers, java.util.List<String> out) {
         for (BlockPos anchor : anchors) {
             for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
                 BlockPos pos = anchor.relative(direction);
-                if (!seen.add(pos)) {
+                if (!serverLevel.hasChunkAt(pos)) {
                     continue;
                 }
                 if (!(serverLevel.getBlockState(pos).getBlock() instanceof computera.block.DisplayPanelBlock)) {
                     continue;
                 }
-                if (serverLevel.getBlockEntity(pos)
-                        instanceof computera.blockentity.DisplayPanelBlockEntity panel
-                        && panel.isController()) {
-                    out.add(pos.getX() + "," + pos.getY() + "," + pos.getZ()
-                            + "|" + panel.wallWidth() + "|" + panel.wallHeight()
-                            + "|" + panel.mode().name());
+                if (serverLevel.getBlockEntity(pos) instanceof DisplayPanelBlockEntity panel) {
+                    DisplayPanelBlockEntity controller = panel.controller();
+                    BlockPos ctrlPos = controller.controllerPosition();
+                    if (seenControllers.add(ctrlPos)) {
+                        out.add(ctrlPos.getX() + "," + ctrlPos.getY() + "," + ctrlPos.getZ()
+                                + "|" + controller.wallWidth() + "|" + controller.wallHeight()
+                                + "|" + controller.mode().name());
+                    }
                 }
             }
         }
@@ -1237,11 +1364,13 @@ public class TerminalBlockEntity extends BlockEntity {
                 BlockPos pos = new BlockPos(Integer.parseInt(parts[0].trim()),
                         Integer.parseInt(parts[1].trim()), Integer.parseInt(parts[2].trim()));
                 Cluster current = cluster();
-                boolean linked = current != null && current.blocks().stream().anyMatch(anchor -> anchor.distManhattan(pos) == 1);
-                if (linked && level.hasChunkAt(pos) && level.getBlockEntity(pos)
-                        instanceof computera.blockentity.DisplayPanelBlockEntity panel
+                if (current != null && level != null && level.hasChunkAt(pos)
+                        && level.getBlockEntity(pos) instanceof DisplayPanelBlockEntity panel
                         && panel.isController()) {
-                    panel.setMode(computera.blockentity.DisplayMode.byName(modeText));
+                    Cluster wallCluster = panel.linkedCluster();
+                    if (wallCluster != null && wallCluster.blocks().contains(worldPosition)) {
+                        panel.setMode(computera.blockentity.DisplayMode.byName(modeText));
+                    }
                 }
             } catch (NumberFormatException ignored) {
             }
@@ -1260,6 +1389,21 @@ public class TerminalBlockEntity extends BlockEntity {
         }
     }
 
+    private static boolean isWhitelistedVanillaMenu(net.minecraft.world.level.block.Block block) {
+        return block instanceof net.minecraft.world.level.block.ChestBlock
+                || block instanceof net.minecraft.world.level.block.BarrelBlock
+                || block instanceof net.minecraft.world.level.block.ShulkerBoxBlock
+                || block instanceof net.minecraft.world.level.block.AbstractFurnaceBlock
+                || block instanceof net.minecraft.world.level.block.HopperBlock
+                || block instanceof net.minecraft.world.level.block.DispenserBlock
+                || block instanceof net.minecraft.world.level.block.BrewingStandBlock;
+    }
+
+    private static boolean isWhitelistedComputeraMenu(net.minecraft.world.level.block.Block block) {
+        return block instanceof computera.block.CrateBlock
+                || block instanceof computera.block.CabinetBlock;
+    }
+
     private void openDeviceMenu(ServerPlayer player, String device) {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
@@ -1268,27 +1412,45 @@ public class TerminalBlockEntity extends BlockEntity {
         if (cluster == null) {
             return;
         }
-        var pos = computera.device.DeviceRegistry.positions(serverLevel, cluster).get(device);
-        if (pos == null) {
+        var pos = DeviceRegistry.positions(serverLevel, cluster).get(device);
+        if (pos == null || !serverLevel.hasChunkAt(pos)) {
             respond(player, "no such device");
             return;
         }
-        returnCarried(player);
-        if (serverLevel.getBlockEntity(pos) instanceof net.minecraft.world.MenuProvider provider) {
-            var previous = player.containerMenu;
-            var opened = player.openMenu(provider, buffer -> buffer.writeBlockPos(pos));
-            if (opened.isPresent() && player.containerMenu != previous) {
-                computera.menu.RemoteMenus.register(player, this, serverLevel.getBlockEntity(pos));
-            }
-        } else {
+        BlockState state = serverLevel.getBlockState(pos);
+        var block = state.getBlock();
+        boolean isVanilla = isWhitelistedVanillaMenu(block);
+        boolean isComputera = isWhitelistedComputeraMenu(block);
+        if (!isVanilla && !isComputera) {
+            player.sendSystemMessage(Component.translatable("computera.msg.native_unsupported"));
+            return;
+        }
+        BlockEntity targetBe = serverLevel.getBlockEntity(pos);
+        if (targetBe == null) {
             respond(player, "this block has no native menu");
+            return;
+        }
+        net.minecraft.world.MenuProvider provider = isVanilla
+                ? state.getMenuProvider(serverLevel, pos)
+                : (targetBe instanceof net.minecraft.world.MenuProvider mp ? mp : null);
+        if (provider == null) {
+            respond(player, "this block has no native menu or is blocked");
+            return;
+        }
+        returnCarried(player);
+        var previous = player.containerMenu;
+        var opened = isVanilla
+                ? player.openMenu(provider)
+                : player.openMenu(provider, buffer -> buffer.writeBlockPos(pos));
+        if (opened.isPresent() && player.containerMenu != previous) {
+            computera.menu.RemoteMenus.register(player, this, targetBe);
         }
     }
 
     private void logisticsStore(ServerPlayer player, String device, String slotText) {
         var handler = logisticsHandler(device);
         Integer slot = parseInt(slotText);
-        if (handler == null || slot == null || slot < 0 || slot >= player.getInventory().getContainerSize()) {
+        if (handler == null || slot == null || slot < 0 || slot >= 36) {
             respond(player, "invalid slot");
             return;
         }
@@ -1370,13 +1532,8 @@ public class TerminalBlockEntity extends BlockEntity {
         if (cluster == null) {
             return null;
         }
-        var positions = computera.device.DeviceRegistry.positions(serverLevel, cluster);
-        var pos = positions.get(device);
-        if (pos == null) {
-            return null;
-        }
-        return serverLevel.getCapability(
-                net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, pos, null);
+        var entry = DeviceRegistry.entries(serverLevel, cluster).get(device);
+        return DeviceRegistry.itemHandler(serverLevel, entry);
     }
 
     @Nullable
@@ -1391,19 +1548,23 @@ public class TerminalBlockEntity extends BlockEntity {
     private void releaseViewer(ServerPlayer player) {
         viewers.remove(player.getUUID());
         sessionOrigins.remove(player.getUUID());
+        logisticsSelections.remove(player.getUUID());
         returnCarried(player);
     }
 
     private void respond(ServerPlayer player, String... lines) {
+        List<String> clamped = new ArrayList<>(lines.length);
         for (String line : lines) {
-            print(line);
+            String safe = clampLine(line);
+            clamped.add(safe);
+            print(safe);
         }
         var audience = onlineViewers();
         for (ServerPlayer viewer : audience) {
-            PacketDistributor.sendToPlayer(viewer, new TerminalLinesPayload(worldPosition, List.of(lines)));
+            PacketDistributor.sendToPlayer(viewer, new TerminalLinesPayload(worldPosition, clamped));
         }
         if (!audience.contains(player)) {
-            PacketDistributor.sendToPlayer(player, new TerminalLinesPayload(worldPosition, List.of(lines)));
+            PacketDistributor.sendToPlayer(player, new TerminalLinesPayload(worldPosition, clamped));
         }
     }
 
@@ -1427,12 +1588,16 @@ public class TerminalBlockEntity extends BlockEntity {
 
         @Override
         public void print(String text) {
-            pendingOutput.add(text);
+            if (pendingOutput.size() < MAX_PENDING_PER_TICK) {
+                pendingOutput.add(clampLine(text));
+            }
         }
 
         @Override
         public void error(String text) {
-            pendingOutput.add("[error] " + text);
+            if (pendingOutput.size() < MAX_PENDING_PER_TICK) {
+                pendingOutput.add(clampLine("[error] " + text));
+            }
         }
 
         @Override

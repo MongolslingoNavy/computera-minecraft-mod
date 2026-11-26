@@ -1,5 +1,8 @@
 package computera.device;
 
+import computera.block.CrateBlock;
+import computera.blockentity.CabinetBlockEntity;
+import computera.blockentity.CrateBlockEntity;
 import computera.cluster.Cluster;
 import computera.script.Device;
 import net.minecraft.core.BlockPos;
@@ -10,33 +13,62 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.transfer.ResourceHandler;
 import net.neoforged.neoforge.transfer.fluid.FluidResource;
 import net.neoforged.neoforge.transfer.item.ItemResource;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public final class DeviceRegistry {
-    public static java.util.Map<String, BlockPos> positions(ServerLevel level, Cluster cluster) {
-        java.util.Map<String, BlockPos> map = new java.util.LinkedHashMap<>();
-        scanInto(level, cluster, (name, pos, device) -> map.put(name, pos));
+    public record DeviceEntry(String key, BlockPos pos, @Nullable Direction accessSide, boolean fluid) {
+    }
+
+    public static Map<String, DeviceEntry> entries(ServerLevel level, Cluster cluster) {
+        Map<String, DeviceEntry> map = new LinkedHashMap<>();
+        scanEntries(level, cluster, entry -> map.put(entry.key(), entry));
         return map;
     }
 
-    public static java.util.List<String> describe(ServerLevel level, Cluster cluster) {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        scanInto(level, cluster, (name, pos, device) ->
-                lines.add(name + "  " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).getPath()
-                        + " @ " + pos.toShortString()));
+    public static Map<String, BlockPos> positions(ServerLevel level, Cluster cluster) {
+        Map<String, BlockPos> map = new LinkedHashMap<>();
+        scanEntries(level, cluster, entry -> map.put(entry.key(), entry.pos()));
+        return map;
+    }
+
+    public static List<String> describe(ServerLevel level, Cluster cluster) {
+        List<String> lines = new ArrayList<>();
+        scanEntries(level, cluster, entry ->
+                lines.add(entry.key() + "  "
+                        + BuiltInRegistries.BLOCK.getKey(level.getBlockState(entry.pos()).getBlock()).getPath()
+                        + " @ " + entry.pos().toShortString()));
         return lines;
     }
 
-    private interface Sink {
-        void accept(String name, BlockPos pos, Device device);
+    @Nullable
+    public static ResourceHandler<ItemResource> itemHandler(ServerLevel level, DeviceEntry entry) {
+        if (entry == null || entry.fluid() || !level.hasChunkAt(entry.pos())) {
+            return null;
+        }
+        return level.getCapability(Capabilities.Item.BLOCK, entry.pos(), entry.accessSide());
     }
 
-    private static void scanInto(ServerLevel level, Cluster cluster, Sink sink) {
+    @Nullable
+    public static ResourceHandler<FluidResource> fluidHandler(ServerLevel level, DeviceEntry entry) {
+        if (entry == null || !entry.fluid() || !level.hasChunkAt(entry.pos())) {
+            return null;
+        }
+        return level.getCapability(Capabilities.Fluid.BLOCK, entry.pos(), entry.accessSide());
+    }
+
+    private interface EntrySink {
+        void accept(DeviceEntry entry);
+    }
+
+    private static void scanEntries(ServerLevel level, Cluster cluster, EntrySink sink) {
         Set<BlockPos> seen = new HashSet<>();
         Set<BlockPos> crateRoots = new HashSet<>();
         Map<String, Integer> counters = new HashMap<>();
@@ -47,59 +79,92 @@ public final class DeviceRegistry {
                 if (!level.hasChunkAt(pos) || clusterBlocks.contains(pos) || !seen.add(pos)) {
                     continue;
                 }
-                var itemHandler = level.getCapability(Capabilities.Item.BLOCK, pos, direction.getOpposite());
+                Direction contactFace = direction.getOpposite();
+                Direction itemSide = contactFace;
+                var itemHandler = level.getCapability(Capabilities.Item.BLOCK, pos, contactFace);
                 if (itemHandler == null) {
                     itemHandler = level.getCapability(Capabilities.Item.BLOCK, pos, null);
+                    itemSide = null;
                 }
                 String type = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).getPath();
                 if (itemHandler != null) {
-                    if (level.getBlockState(pos).getBlock() instanceof computera.block.CrateBlock
-                            && level.getBlockEntity(pos) instanceof computera.blockentity.CrateBlockEntity crate
+                    if (level.getBlockState(pos).getBlock() instanceof CrateBlock
+                            && level.getBlockEntity(pos) instanceof CrateBlockEntity crate
                             && !crateRoots.add(crate.groupRoot())) {
                         continue;
                     }
                     int index = counters.merge(type, 1, Integer::sum);
-                    sink.accept(type + "_" + index, pos, new ContainerDevice(itemHandler));
+                    sink.accept(new DeviceEntry(type + "_" + index, pos.immutable(), itemSide, false));
                     continue;
                 }
-                var fluidHandler = level.getCapability(Capabilities.Fluid.BLOCK, pos, direction.getOpposite());
+                Direction fluidSide = contactFace;
+                var fluidHandler = level.getCapability(Capabilities.Fluid.BLOCK, pos, contactFace);
                 if (fluidHandler == null) {
                     fluidHandler = level.getCapability(Capabilities.Fluid.BLOCK, pos, null);
+                    fluidSide = null;
                 }
                 if (fluidHandler != null) {
                     int index = counters.merge(type + "_fluid", 1, Integer::sum);
-                    sink.accept(type + "_fluid_" + index, pos, new FluidDevice(fluidHandler));
+                    sink.accept(new DeviceEntry(type + "_fluid_" + index, pos.immutable(), fluidSide, true));
                 }
             }
         }
-        for (computera.cluster.Cluster ignored : java.util.List.of(cluster)) {
-            for (BlockPos cabinetPos : cluster.cabinets()) {
-                if (!(level.getBlockEntity(cabinetPos) instanceof computera.blockentity.CabinetBlockEntity cabinet)) {
+        for (BlockPos cabinetPos : cluster.cabinets()) {
+            if (!level.hasChunkAt(cabinetPos)
+                    || !(level.getBlockEntity(cabinetPos) instanceof CabinetBlockEntity cabinet)) {
+                continue;
+            }
+            cabinet.pruneWireless(level);
+            for (BlockPos wirelessPos : List.copyOf(cabinet.wireless())) {
+                if (!level.hasChunkAt(wirelessPos) || !seen.add(wirelessPos)) {
                     continue;
                 }
-                for (BlockPos wirelessPos : cabinet.wireless()) {
-                    if (!level.hasChunkAt(wirelessPos) || !seen.add(wirelessPos)) {
-                        continue;
-                    }
-                    var handler = level.getCapability(Capabilities.Item.BLOCK, wirelessPos, null);
-                    if (handler == null) {
-                        continue;
-                    }
-                    if (level.getBlockEntity(wirelessPos) instanceof computera.blockentity.CrateBlockEntity crate
-                            && !crateRoots.add(crate.groupRoot())) {
-                        continue;
-                    }
-                    String type = BuiltInRegistries.BLOCK.getKey(level.getBlockState(wirelessPos).getBlock()).getPath();
-                    int index = counters.merge(type + "_wireless", 1, Integer::sum);
-                    sink.accept(type + "_wireless_" + index, wirelessPos, new ContainerDevice(handler));
+                Direction face = cabinet.wirelessFace(wirelessPos);
+                var handler = level.getCapability(Capabilities.Item.BLOCK, wirelessPos, face);
+                if (handler == null && face != null) {
+                    handler = level.getCapability(Capabilities.Item.BLOCK, wirelessPos, null);
+                    face = null;
                 }
+                if (handler == null) {
+                    continue;
+                }
+                if (level.getBlockEntity(wirelessPos) instanceof CrateBlockEntity crate
+                        && !crateRoots.add(crate.groupRoot())) {
+                    continue;
+                }
+                String type = BuiltInRegistries.BLOCK.getKey(level.getBlockState(wirelessPos).getBlock()).getPath();
+                int index = counters.merge(type + "_wireless", 1, Integer::sum);
+                sink.accept(new DeviceEntry(type + "_wireless_" + index, wirelessPos.immutable(), face, false));
             }
         }
     }
 
     public static Map<String, Device> scan(ServerLevel level, Cluster cluster) {
+        BlockPos anchor = cluster.cabinets().isEmpty()
+                ? (cluster.blocks().isEmpty() ? null : cluster.blocks().iterator().next())
+                : cluster.cabinets().iterator().next();
+        return scan(level, anchor, cluster);
+    }
+
+    public static Map<String, Device> scan(ServerLevel level, @Nullable BlockPos anchorPos, Cluster cluster) {
         Map<String, Device> devices = new LinkedHashMap<>();
-        scanInto(level, cluster, (name, pos, device) -> devices.put(name, device));
+        scanEntries(level, cluster, entry -> {
+            if (anchorPos != null) {
+                devices.put(entry.key(), entry.fluid()
+                        ? new FluidDevice(level, anchorPos, entry.key(), entry.pos())
+                        : new ContainerDevice(level, anchorPos, entry.key(), entry.pos()));
+            } else if (entry.fluid()) {
+                var h = fluidHandler(level, entry);
+                if (h != null) {
+                    devices.put(entry.key(), new FluidDevice(h));
+                }
+            } else {
+                var h = itemHandler(level, entry);
+                if (h != null) {
+                    devices.put(entry.key(), new ContainerDevice(h));
+                }
+            }
+        });
         return devices;
     }
 

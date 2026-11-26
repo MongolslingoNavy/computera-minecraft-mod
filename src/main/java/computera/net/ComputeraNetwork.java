@@ -49,7 +49,7 @@ public final class ComputeraNetwork {
         }
         if (player.level().getBlockEntity(payload.pos())
                 instanceof computera.blockentity.DisplayPanelBlockEntity panel) {
-            panel.openFor(player);
+            panel.openStatus(player);
         }
     }
 

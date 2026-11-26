@@ -35,6 +35,7 @@ public class CrtScreen extends Screen {
 
     private int left;
     private int top;
+    private int fileScroll;
     private EditBox newName;
 
     public CrtScreen(BlockPos pos, int threads, int used, boolean running, String runningFile,
@@ -53,11 +54,25 @@ public class CrtScreen extends Screen {
     protected void init() {
         left = (this.width - WIDTH) / 2;
         top = (this.height - HEIGHT) / 2;
-        hits.clear();
+        fileScroll = Math.max(0, Math.min(fileScroll, Math.max(0, files.size() - MAX_ROWS)));
 
-        int shown = Math.min(files.size(), MAX_ROWS);
+        int footer = top + HEIGHT - 26;
+        this.newName = new EditBox(this.font, left + 52, footer, 120, 16,
+                Component.translatable("computera.gui.crt.filename"));
+        this.newName.setMaxLength(64);
+        this.newName.setValue("program.py");
+        this.addRenderableWidget(this.newName);
+        this.setInitialFocus(this.newName);
+        rebuildHits();
+    }
+
+    private void rebuildHits() {
+        hits.clear();
+        int maxScroll = Math.max(0, files.size() - MAX_ROWS);
+        fileScroll = Math.max(0, Math.min(fileScroll, maxScroll));
+        int shown = Math.min(files.size() - fileScroll, MAX_ROWS);
         for (int i = 0; i < shown; i++) {
-            String name = files.get(i);
+            String name = files.get(fileScroll + i);
             int y = top + 48 + i * ROW;
             hits.add(new Hit(left + WIDTH - 132, y, 40, 14, () -> command("run " + name)));
             hits.add(new Hit(left + WIDTH - 88, y, 40, 14, () -> action("open", name, "")));
@@ -73,13 +88,17 @@ public class CrtScreen extends Screen {
         hits.add(new Hit(left + 306, top + 4, 44, 14, () -> action("display_list", "", "")));
         hits.add(new Hit(left + 356, top + 4, 58, 14, () -> ClientPacketDistributor.sendToServer(
                 new TerminalActionPayload(pos, "auto", "", ""))));
+    }
 
-        this.newName = new EditBox(this.font, left + 52, footer, 120, 16,
-                Component.translatable("computera.gui.crt.filename"));
-        this.newName.setMaxLength(64);
-        this.newName.setValue("program.py");
-        this.addRenderableWidget(this.newName);
-        this.setInitialFocus(this.newName);
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (files.size() > MAX_ROWS) {
+            fileScroll = Math.max(0, Math.min(files.size() - MAX_ROWS,
+                    fileScroll + (scrollY < 0 ? 1 : -1)));
+            rebuildHits();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     private void command(String command) {
@@ -152,15 +171,20 @@ public class CrtScreen extends Screen {
 
         graphics.text(this.font, Component.translatable("computera.gui.crt.files"),
                 left + 10, top + 36, 0xFF5F8A6A, false);
+        if (files.size() > MAX_ROWS) {
+            int maxScroll = files.size() - MAX_ROWS;
+            graphics.text(this.font, Component.literal((fileScroll + 1) + "/" + (maxScroll + 1)),
+                    left + WIDTH - 42, top + 36, 0xFF5F8A6A, false);
+        }
         if (files.isEmpty()) {
             graphics.text(this.font, Component.translatable("computera.gui.crt.empty"),
                     left + 12, top + 52, 0xFF4F6A58, false);
         }
-        int shown = Math.min(files.size(), MAX_ROWS);
+        int shown = Math.min(files.size() - fileScroll, MAX_ROWS);
         for (int i = 0; i < shown; i++) {
             int y = top + 48 + i * ROW;
             graphics.fill(left + 8, y, left + WIDTH - 136, y + 14, i % 2 == 0 ? 0xFF18261C : 0xFF141F18);
-            graphics.text(this.font, trim(files.get(i), 34), left + 12, y + 3, 0xFFC8E8D0, false);
+            graphics.text(this.font, trim(files.get(fileScroll + i), 34), left + 12, y + 3, 0xFFC8E8D0, false);
             drawButton(graphics, left + WIDTH - 132, y, 40, 14,
                     Component.translatable("computera.gui.crt.run"), mouseX, mouseY);
             drawButton(graphics, left + WIDTH - 88, y, 40, 14,

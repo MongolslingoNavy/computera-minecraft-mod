@@ -1,34 +1,104 @@
 package computera.device;
 
+import computera.cluster.Cluster;
+import computera.cluster.ClusterManager;
 import computera.script.Device;
 import computera.script.ScriptRuntimeException;
 import computera.script.Value;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.transfer.ResourceHandler;
 import net.neoforged.neoforge.transfer.item.ItemResource;
 import net.neoforged.neoforge.transfer.transaction.Transaction;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 public final class ContainerDevice implements Device {
-    private final ResourceHandler<ItemResource> handler;
+    @Nullable
+    private final ResourceHandler<ItemResource> directHandler;
+    @Nullable
+    private final ServerLevel level;
+    @Nullable
+    private final BlockPos anchorPos;
+    @Nullable
+    private final String key;
+    @Nullable
+    private final BlockPos targetPos;
 
     public ContainerDevice(ResourceHandler<ItemResource> handler) {
-        this.handler = handler;
+        this.directHandler = handler;
+        this.level = null;
+        this.anchorPos = null;
+        this.key = null;
+        this.targetPos = null;
+    }
+
+    public ContainerDevice(ServerLevel level, BlockPos anchorPos, String key, BlockPos targetPos) {
+        this.directHandler = null;
+        this.level = level;
+        this.anchorPos = anchorPos.immutable();
+        this.key = key;
+        this.targetPos = targetPos.immutable();
+    }
+
+    private ResourceHandler<ItemResource> resolveHandler() {
+        if (directHandler != null) {
+            return directHandler;
+        }
+        if (level == null || anchorPos == null || targetPos == null
+                || !level.hasChunkAt(anchorPos) || !level.hasChunkAt(targetPos)) {
+            throw new ScriptRuntimeException("container disconnected: " + key);
+        }
+        Cluster cluster = ClusterManager.clusterFor(level, anchorPos);
+        if (cluster == null) {
+            throw new ScriptRuntimeException("container disconnected: " + key);
+        }
+        DeviceRegistry.DeviceEntry entry = null;
+        for (DeviceRegistry.DeviceEntry candidate : DeviceRegistry.entries(level, cluster).values()) {
+            if (!candidate.fluid() && candidate.pos().equals(targetPos)) {
+                entry = candidate;
+                break;
+            }
+        }
+        if (entry == null) {
+            throw new ScriptRuntimeException("container disconnected: " + key);
+        }
+        ResourceHandler<ItemResource> handler = DeviceRegistry.itemHandler(level, entry);
+        if (handler == null) {
+            throw new ScriptRuntimeException("container unavailable: " + key);
+        }
+        return handler;
+    }
+
+    private static void checkSlot(ResourceHandler<ItemResource> handler, int slot) {
+        if (slot < 0 || slot >= handler.size()) {
+            throw new ScriptRuntimeException("slot out of range: " + slot);
+        }
     }
 
     @Override
     public Value call(String method, List<Value> args) {
+        ResourceHandler<ItemResource> handler = resolveHandler();
         return switch (method) {
             case "size" -> Value.of(handler.size());
-            case "get" -> getItem(intArg(args, 0));
+            case "get" -> getItem(handler, intArg(args, 0));
             case "take" -> Value.of(take(intArg(args, 0), intArg(args, 1)));
             case "put" -> Value.of(put(intArg(args, 0), stringArg(args, 1), intArg(args, 2)));
-            case "move" -> Value.of(move(intArg(args, 0), intArg(args, 1), intArg(args, 2)));
-            case "id" -> Value.of(itemId(handler.getResource(intArg(args, 0))));
-            case "count" -> Value.of(handler.getAmountAsLong(intArg(args, 0)));
+            case "move" -> Value.of(move(handler, intArg(args, 0), intArg(args, 1), intArg(args, 2)));
+            case "id" -> {
+                int slot = intArg(args, 0);
+                checkSlot(handler, slot);
+                yield Value.of(itemId(handler.getResource(slot)));
+            }
+            case "count" -> {
+                int slot = intArg(args, 0);
+                checkSlot(handler, slot);
+                yield Value.of(handler.getAmountAsLong(slot));
+            }
             default -> throw new ScriptRuntimeException("container has no method " + method);
         };
     }
@@ -38,7 +108,8 @@ public final class ContainerDevice implements Device {
         throw new ScriptRuntimeException("container has no property " + property);
     }
 
-    private Value getItem(int slot) {
+    private Value getItem(ResourceHandler<ItemResource> handler, int slot) {
+        checkSlot(handler, slot);
         ItemResource resource = handler.getResource(slot);
         long amount = handler.getAmountAsLong(slot);
         Map<String, Value> map = new LinkedHashMap<>();
@@ -55,7 +126,9 @@ public final class ContainerDevice implements Device {
         throw new ScriptRuntimeException("put cannot create items: use move or logistics automation");
     }
 
-    private long move(int from, int to, int amount) {
+    private long move(ResourceHandler<ItemResource> handler, int from, int to, int amount) {
+        checkSlot(handler, from);
+        checkSlot(handler, to);
         if (amount <= 0 || from == to) {
             return 0;
         }
