@@ -6,8 +6,8 @@
     "GQG"
   ],
   "key": {
-    "G": "minecraft:gold_ingot",
-    "Q": "minecraft:redstone_block",
+    "G": "#c:ingots/gold",
+    "Q": "#c:storage_blocks/redstone",
     "C": "computera:compute_card_1"
   },
   "result": {

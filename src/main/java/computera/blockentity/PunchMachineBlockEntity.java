@@ -83,7 +83,7 @@ public class PunchMachineBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    private TerminalBlockEntity adjacentTerminal() {
+    public TerminalBlockEntity adjacentTerminal() {
         if (!(level instanceof ServerLevel serverLevel)) {
             return null;
         }

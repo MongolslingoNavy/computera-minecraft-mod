@@ -6,9 +6,9 @@
     "IXI"
   ],
   "key": {
-    "I": "minecraft:iron_ingot",
+    "I": "#c:ingots/iron",
     "X": "computera:copper_wire",
-    "C": "minecraft:redstone"
+    "C": "#c:dusts/redstone"
   },
   "result": {
     "id": "computera:cabinet",

@@ -6,10 +6,10 @@
     "IRI"
   ],
   "key": {
-    "G": "minecraft:glass",
+    "G": "#c:glass_blocks",
     "X": "computera:copper_wire",
-    "I": "minecraft:iron_ingot",
-    "R": "minecraft:redstone"
+    "I": "#c:ingots/iron",
+    "R": "#c:dusts/redstone"
   },
   "result": {
     "id": "computera:terminal_crt",

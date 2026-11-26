@@ -162,6 +162,16 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         return count;
     }
 
+    public int installedDrives() {
+        int count = 0;
+        for (ItemStack stack : drives) {
+            if (!stack.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public java.util.List<String> rules() {
         return rules;
     }

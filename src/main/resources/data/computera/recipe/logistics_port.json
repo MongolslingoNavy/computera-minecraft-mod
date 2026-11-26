@@ -6,10 +6,10 @@
     "IXI"
   ],
   "key": {
-    "I": "minecraft:iron_ingot",
+    "I": "#c:ingots/iron",
     "X": "computera:copper_wire",
-    "R": "minecraft:redstone",
-    "C": "minecraft:chest"
+    "R": "#c:dusts/redstone",
+    "C": "#c:chests/wooden"
   },
   "result": {
     "id": "computera:logistics_port",

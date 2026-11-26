@@ -2,8 +2,8 @@
   "type": "minecraft:crafting_shapeless",
   "ingredients": [
     "computera:copper_wire",
-    "minecraft:redstone",
-    "minecraft:amethyst_shard"
+    "#c:dusts/redstone",
+    "#c:gems/amethyst"
   ],
   "result": {
     "id": "computera:flash_drive",

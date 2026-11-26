@@ -1,7 +1,7 @@
 {
   "type": "minecraft:crafting_shapeless",
   "ingredients": [
-    "minecraft:iron_ingot",
+    "#c:ingots/iron",
     "computera:copper_wire",
     "computera:copper_wire"
   ],

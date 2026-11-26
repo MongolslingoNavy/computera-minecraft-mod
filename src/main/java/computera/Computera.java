@@ -36,6 +36,7 @@ public class Computera {
 
         modEventBus.addListener(Computera::registerCapabilities);
         modEventBus.addListener(ComputeraNetwork::register);
+        computera.compat.ComputeraTopCompat.install(modEventBus);
         NeoForge.EVENT_BUS.addListener(ClusterManager::onServerTick);
         NeoForge.EVENT_BUS.addListener(ComputeraCommands::register);
         NeoForge.EVENT_BUS.addListener(computera.compat.ConnectionRefresher::onChunkLoad);

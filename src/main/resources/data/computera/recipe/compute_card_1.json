@@ -7,8 +7,8 @@
   ],
   "key": {
     "X": "computera:copper_wire",
-    "W": "minecraft:quartz",
-    "Q": "minecraft:redstone",
+    "W": "#c:gems/quartz",
+    "Q": "#c:dusts/redstone",
     "R": "minecraft:paper"
   },
   "result": {

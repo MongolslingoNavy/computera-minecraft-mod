@@ -82,6 +82,11 @@ public class TerminalBlockEntity extends BlockEntity {
         return vm != null;
     }
 
+    @Nullable
+    public String runningFile() {
+        return runningFile;
+    }
+
     public int tapeLines() {
         return tapeLines;
     }
