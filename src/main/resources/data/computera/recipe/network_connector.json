@@ -6,9 +6,9 @@
     " E "
   ],
   "key": {
-    "X": "computera:copper_wire",
-    "R": "minecraft:redstone",
-    "E": "minecraft:ender_pearl"
+    "X": "#c:wires/copper",
+    "R": "#c:dusts/redstone",
+    "E": "#c:ender_pearls"
   },
   "result": {
     "id": "computera:network_connector",

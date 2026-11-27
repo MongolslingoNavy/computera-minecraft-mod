@@ -2,23 +2,34 @@ package computera.blockentity;
 
 import computera.cluster.Cluster;
 import computera.cluster.ClusterManager;
+import computera.device.DeviceRegistry;
 import computera.item.ComputeCardItem;
 import computera.registry.ModBlockEntities;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.transfer.energy.SimpleEnergyHandler;
+import net.neoforged.neoforge.transfer.item.ItemResource;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -26,13 +37,21 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
     public static final int CARD_SLOTS = 8;
     public static final int DRIVE_SLOTS = 2;
     public static final int ENERGY_CAPACITY = 1_000_000;
+    public static final int MAX_WIRELESS = 64;
+    public static final int MAX_FILES = 64;
+    public static final int MAX_FILE_SIZE = 16_384;
+    public static final int MAX_FILE_NAME = 64;
+    public static final int MAX_ALIASES = 256;
+    public static final int MAX_GROUPS = 256;
+    public static final int MAX_ALIAS_LEN = 32;
+    public static final int MAX_GROUP_LEN = 16;
 
     private final NonNullList<ItemStack> cards = NonNullList.withSize(CARD_SLOTS, ItemStack.EMPTY);
     private final NonNullList<ItemStack> drives = NonNullList.withSize(DRIVE_SLOTS, ItemStack.EMPTY);
     private final SimpleEnergyHandler energy = new SimpleEnergyHandler(ENERGY_CAPACITY, 10_000, 10_000);
     private final Map<String, String> files = new LinkedHashMap<>();
     private final Map<String, String> aliases = new LinkedHashMap<>();
-    private final java.util.Set<BlockPos> wireless = new java.util.LinkedHashSet<>();
+    private final Map<BlockPos, @Nullable Direction> wirelessFaces = new LinkedHashMap<>();
     private final Map<String, String> groups = new LinkedHashMap<>();
     private final java.util.List<String> rules = new java.util.ArrayList<>();
     private final java.util.Map<Integer, Integer> ruleCooldowns = new java.util.HashMap<>();
@@ -143,6 +162,16 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         return count;
     }
 
+    public int installedDrives() {
+        int count = 0;
+        for (ItemStack stack : drives) {
+            if (!stack.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public java.util.List<String> rules() {
         return rules;
     }
@@ -178,10 +207,24 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
     }
 
     public void setAlias(String key, String alias) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
         if (alias == null || alias.isBlank()) {
             aliases.remove(key);
         } else {
-            aliases.put(key, alias.replace('|', ' ').replace(',', ' '));
+            if (!aliases.containsKey(key) && aliases.size() >= MAX_ALIASES) {
+                return;
+            }
+            String clean = alias.replace('|', ' ').replace(',', ' ').trim();
+            if (clean.length() > MAX_ALIAS_LEN) {
+                clean = clean.substring(0, MAX_ALIAS_LEN);
+            }
+            if (clean.isEmpty()) {
+                aliases.remove(key);
+            } else {
+                aliases.put(key, clean);
+            }
         }
         setChanged();
     }
@@ -191,30 +234,137 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
     }
 
     public void setGroup(String key, String group) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
         if (group == null || group.isBlank()) {
             groups.remove(key);
         } else {
-            groups.put(key, group.replace('|', ' ').replace(',', ' '));
+            if (!groups.containsKey(key) && groups.size() >= MAX_GROUPS) {
+                return;
+            }
+            String clean = group.replace('|', ' ').replace(',', ' ').trim();
+            if (clean.length() > MAX_GROUP_LEN) {
+                clean = clean.substring(0, MAX_GROUP_LEN);
+            }
+            if (clean.isEmpty()) {
+                groups.remove(key);
+            } else {
+                groups.put(key, clean);
+            }
         }
         setChanged();
     }
 
     public java.util.Set<BlockPos> wireless() {
-        return wireless;
+        return Collections.unmodifiableSet(wirelessFaces.keySet());
     }
 
-    public void addWireless(BlockPos pos) {
-        wireless.add(pos.immutable());
+    @Nullable
+    public Direction wirelessFace(BlockPos pos) {
+        return wirelessFaces.get(pos);
+    }
+
+    public boolean addWireless(BlockPos pos) {
+        return addWireless(pos, null);
+    }
+
+    public boolean addWireless(BlockPos pos, @Nullable Direction face) {
+        BlockPos immutable = pos.immutable();
+        if (!wirelessFaces.containsKey(immutable) && wirelessFaces.size() >= MAX_WIRELESS) {
+            return false;
+        }
+        wirelessFaces.put(immutable, face);
         setChanged();
+        if (level instanceof ServerLevel serverLevel) {
+            ClusterManager.invalidate(serverLevel, worldPosition);
+        }
+        return true;
+    }
+
+    public boolean removeWireless(BlockPos pos) {
+        if (wirelessFaces.containsKey(pos)) {
+            wirelessFaces.remove(pos);
+            setChanged();
+            if (level instanceof ServerLevel serverLevel) {
+                ClusterManager.invalidate(serverLevel, worldPosition);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    public void pruneWireless(ServerLevel serverLevel) {
+        boolean removed = false;
+        Iterator<Map.Entry<BlockPos, Direction>> iterator = wirelessFaces.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<BlockPos, Direction> entry = iterator.next();
+            BlockPos pos = entry.getKey();
+            if (!serverLevel.hasChunkAt(pos)) {
+                continue;
+            }
+            Direction face = entry.getValue();
+            boolean valid = serverLevel.getCapability(Capabilities.Item.BLOCK, pos, face) != null
+                    || (face != null && serverLevel.getCapability(Capabilities.Item.BLOCK, pos, null) != null);
+            if (!valid) {
+                iterator.remove();
+                removed = true;
+            }
+        }
+        if (removed) {
+            setChanged();
+            ClusterManager.invalidate(serverLevel, worldPosition);
+        }
+    }
+
+    public boolean hasPreservableState() {
+        return energy.getAmountAsLong() > 0L
+                || !files.isEmpty()
+                || !aliases.isEmpty()
+                || !groups.isEmpty()
+                || !rules.isEmpty()
+                || !wirelessFaces.isEmpty();
     }
 
     public Map<String, String> files() {
         return files;
     }
 
-    public void putFile(String name, String source) {
-        files.put(name, source);
+    public boolean putFile(String name, String source) {
+        if (name == null || name.isBlank() || name.length() > MAX_FILE_NAME) {
+            return false;
+        }
+        String text = source == null ? "" : source;
+        if (text.length() > MAX_FILE_SIZE) {
+            return false;
+        }
+        if (!files.containsKey(name) && files.size() >= MAX_FILES) {
+            return false;
+        }
+        files.put(name, text);
         setChanged();
+        return true;
+    }
+
+    @Override
+    public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        if (level instanceof ServerLevel serverLevel) {
+            for (int i = 0; i < CARD_SLOTS; i++) {
+                ItemStack stack = cards.get(i);
+                if (!stack.isEmpty()) {
+                    Block.popResource(serverLevel, pos, stack);
+                    cards.set(i, ItemStack.EMPTY);
+                }
+            }
+            for (int i = 0; i < DRIVE_SLOTS; i++) {
+                ItemStack stack = drives.get(i);
+                if (!stack.isEmpty()) {
+                    Block.popResource(serverLevel, pos, stack);
+                    drives.set(i, ItemStack.EMPTY);
+                }
+            }
+            setChanged();
+        }
     }
 
     public void serverTick() {
@@ -233,7 +383,7 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         if (cluster == null) {
             return;
         }
-        var positions = computera.device.DeviceRegistry.positions(level, cluster);
+        var entries = DeviceRegistry.entries(level, cluster);
         for (int i = 0; i < rules.size(); i++) {
             String[] p = rules.get(i).split("\\|", 7);
             if (p.length < 7 || !Boolean.parseBoolean(p[6])) {
@@ -252,7 +402,7 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
             String item = p[3];
             int count = parse(p[4], 1);
             if ("move".equals(type)) {
-                moveItems(level, positions, from, to, item, count);
+                moveItems(level, entries, from, to, item, count);
             }
         }
     }
@@ -266,40 +416,50 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         return name;
     }
 
-    private void moveItems(ServerLevel level, java.util.Map<String, BlockPos> positions,
+    private void moveItems(ServerLevel level, Map<String, DeviceRegistry.DeviceEntry> entries,
                            String from, String to, String item, int count) {
-        var id = net.minecraft.resources.Identifier.tryParse(item);
-        if (id == null || count <= 0) {
+        if (!computera.util.ItemFilter.isValid(item) || count <= 0) {
             return;
         }
-        var fromPos = positions.get(from);
-        var toPos = positions.get(to);
-        if (fromPos == null || toPos == null) {
+        var fromEntry = entries.get(from);
+        var toEntry = entries.get(to);
+        if (fromEntry == null || toEntry == null || fromEntry.pos().equals(toEntry.pos())) {
             return;
         }
-        var source = level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, fromPos, null);
-        var target = level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, toPos, null);
+        if (level.getBlockEntity(fromEntry.pos()) instanceof CrateBlockEntity fromCrate
+                && level.getBlockEntity(toEntry.pos()) instanceof CrateBlockEntity toCrate
+                && fromCrate.groupRoot().equals(toCrate.groupRoot())) {
+            return;
+        }
+        var source = DeviceRegistry.itemHandler(level, fromEntry);
+        var target = DeviceRegistry.itemHandler(level, toEntry);
         if (source == null || target == null) {
             return;
         }
-        var resource = net.neoforged.neoforge.transfer.item.ItemResource.of(
-                new ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(
-                        id)));
-        try (var transaction = net.neoforged.neoforge.transfer.transaction.Transaction.openRoot()) {
-            if (resource.isEmpty()) {
-                return;
+        int remaining = Math.min(count, 64);
+        for (int slot = 0; slot < source.size() && remaining > 0; slot++) {
+            ItemResource resource = source.getResource(slot);
+            if (resource.isEmpty() || !computera.util.ItemFilter.matches(item, resource)) {
+                continue;
             }
-            int accepted;
-            try (var probe = net.neoforged.neoforge.transfer.transaction.Transaction.open(transaction)) {
-                accepted = target.insert(resource, Math.min(count, 64), probe);
+            int want = (int) Math.min(source.getAmountAsLong(slot), remaining);
+            if (want <= 0) {
+                continue;
             }
-            int extracted = source.extract(resource, accepted, transaction);
-            int inserted = extracted > 0 ? target.insert(resource, extracted, transaction) : 0;
-            if (inserted != extracted) {
-                inserted = 0;
-            }
-            if (inserted > 0) {
-                transaction.commit();
+            try (Transaction transaction = Transaction.openRoot()) {
+                int accepted;
+                try (Transaction probe = Transaction.open(transaction)) {
+                    accepted = target.insert(resource, want, probe);
+                }
+                if (accepted <= 0) {
+                    continue;
+                }
+                int extracted = source.extract(slot, resource, accepted, transaction);
+                int inserted = extracted > 0 ? target.insert(resource, extracted, transaction) : 0;
+                if (inserted == extracted && inserted > 0) {
+                    transaction.commit();
+                    remaining -= inserted;
+                }
             }
         }
     }
@@ -356,11 +516,15 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
             child.putString("Group", entry.getValue());
         }
         var wirelessList = output.childrenList("Wireless");
-        for (BlockPos pos : wireless) {
+        for (Map.Entry<BlockPos, Direction> entry : wirelessFaces.entrySet()) {
+            BlockPos pos = entry.getKey();
             ValueOutput child = wirelessList.addChild();
             child.putInt("X", pos.getX());
             child.putInt("Y", pos.getY());
             child.putInt("Z", pos.getZ());
+            if (entry.getValue() != null) {
+                child.putString("Face", entry.getValue().getName());
+            }
         }
         var fileList = output.childrenList("Files");
         for (Map.Entry<String, String> entry : files.entrySet()) {
@@ -400,9 +564,15 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         for (ValueInput child : input.childrenListOrEmpty("Groups")) {
             groups.put(child.getStringOr("Key", ""), child.getStringOr("Group", ""));
         }
-        wireless.clear();
+        wirelessFaces.clear();
         for (ValueInput child : input.childrenListOrEmpty("Wireless")) {
-            wireless.add(new BlockPos(child.getIntOr("X", 0), child.getIntOr("Y", 0), child.getIntOr("Z", 0)));
+            if (wirelessFaces.size() >= MAX_WIRELESS) {
+                break;
+            }
+            BlockPos pos = new BlockPos(child.getIntOr("X", 0), child.getIntOr("Y", 0), child.getIntOr("Z", 0));
+            String faceName = child.getStringOr("Face", "");
+            Direction face = faceName.isEmpty() ? null : Direction.byName(faceName);
+            wirelessFaces.put(pos, face);
         }
         files.clear();
         for (ValueInput child : input.childrenListOrEmpty("Files")) {

@@ -23,6 +23,7 @@ public class TerminalEditorScreen extends Screen {
 
     private EditBox currentLine;
     private int current;
+    private int scroll;
 
     public TerminalEditorScreen(BlockPos pos, String name, String source) {
         super(Component.literal("Edit " + name));
@@ -35,6 +36,10 @@ public class TerminalEditorScreen extends Screen {
                 lines.add(line);
             }
         }
+    }
+
+    private int visibleLines() {
+        return Math.max(1, (this.height - HEADER - 20) / LINE_HEIGHT);
     }
 
     @Override
@@ -53,8 +58,16 @@ public class TerminalEditorScreen extends Screen {
     }
 
     private void layoutCurrentLine() {
-        int y = HEADER + 4 + current * LINE_HEIGHT;
+        int maxLines = visibleLines();
+        if (current < scroll) {
+            scroll = current;
+        } else if (current >= scroll + maxLines) {
+            scroll = current - maxLines + 1;
+        }
+        scroll = Math.max(0, Math.min(scroll, Math.max(0, lines.size() - maxLines)));
+        int y = HEADER + 4 + (current - scroll) * LINE_HEIGHT;
         currentLine.setY(y);
+        currentLine.setVisible(current >= scroll && current < scroll + maxLines);
         currentLine.setValue(lines.get(current));
     }
 
@@ -62,20 +75,40 @@ public class TerminalEditorScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         graphics.fill(0, 0, this.width, this.height, 0xE60C0C0C);
         graphics.fill(0, 0, this.width, HEADER, 0xE6202020);
-        graphics.text(this.font, "edit " + fileName + "   (Esc saves, Enter new line, Up/Down switch)",
+        graphics.text(this.font, "edit " + fileName + "   (Esc saves, Enter new line, Up/Down switch)  L"
+                        + (current + 1) + "/" + lines.size(),
                 10, 9, 0xFF9FE0B0, false);
 
-        int maxLines = Math.max(1, (this.height - HEADER - 20) / LINE_HEIGHT);
-        for (int i = 0; i < lines.size() && i < maxLines; i++) {
-            int y = HEADER + 4 + i * LINE_HEIGHT;
+        int maxLines = visibleLines();
+        int end = Math.min(lines.size(), scroll + maxLines);
+        int textWidth = Math.max(40, this.width - 54);
+        for (int i = scroll; i < end; i++) {
+            int y = HEADER + 4 + (i - scroll) * LINE_HEIGHT;
             if (i == current) {
                 graphics.fill(30, y - 1, this.width - 10, y + LINE_HEIGHT - 3, 0x40204030);
             }
             String number = String.valueOf(i + 1);
             graphics.text(this.font, number, 32 - this.font.width(number), y, 0xFF6A6A6A, false);
+            if (i != current) {
+                String text = lines.get(i);
+                if (this.font.width(text) > textWidth) {
+                    text = this.font.plainSubstrByWidth(text, textWidth) + "…";
+                }
+                graphics.text(this.font, text, 42, y + 1, 0xFFD0DCD4, false);
+            }
         }
 
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        int maxScroll = Math.max(0, lines.size() - visibleLines());
+        scroll = Math.max(0, Math.min(maxScroll, scroll + (scrollY < 0 ? 1 : -1)));
+        int maxLines = visibleLines();
+        currentLine.setY(HEADER + 4 + (current - scroll) * LINE_HEIGHT);
+        currentLine.setVisible(current >= scroll && current < scroll + maxLines);
+        return true;
     }
 
     @Override

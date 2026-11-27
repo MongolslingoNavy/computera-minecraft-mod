@@ -253,6 +253,8 @@ public final class ComputeraCommands {
             ok &= check(results, "logistics port discovered", cluster != null && !cluster.ports().isEmpty());
             ok &= check(results, "logistics index counts diamonds", cluster != null
                     && computera.logistics.LogisticsIndex.count(level, cluster, "minecraft:diamond") == 5);
+            ok &= check(results, "logistics index counts #c:gems/diamond tag", cluster != null
+                    && computera.logistics.LogisticsIndex.count(level, cluster, "#c:gems/diamond") == 5);
 
             TerminalBlockEntity terminal = level.getBlockEntity(terminalPos) instanceof TerminalBlockEntity t
                     ? t
@@ -314,6 +316,13 @@ public final class ComputeraCommands {
                 } catch (computera.script.ScriptRuntimeException expected) {
                     rejected = true;
                 }
+                ok &= check(results, "container has_tag matches diamond tag",
+                        box.call("has_tag", List.of(Value.of(0L), Value.of("c:gems/diamond"))).asBool()
+                                && box.call("has_tag", List.of(Value.of(0L), Value.of("#c:gems/diamond"))).asBool()
+                                && !box.call("has_tag", List.of(Value.of(0L), Value.of("c:ingots/iron"))).asBool());
+                Value tagList = box.call("tags", List.of(Value.of(0L)));
+                ok &= check(results, "container tags lists c:gems/diamond",
+                        tagList.isList() && tagList.asList().stream().anyMatch(v -> "c:gems/diamond".equals(v.asString())));
                 ok &= check(results, "script cannot create items", rejected && chest.getAmountAsLong(0) == 5);
                 box.call("move", List.of(Value.of(0L), Value.of(1L), Value.of(2L)));
                 ok &= check(results, "script move conserves items",
@@ -363,7 +372,7 @@ public final class ComputeraCommands {
                 first.setPos(first.getX() + 20, first.getY(), first.getZ());
                 ok &= check(results, "remote menu rejects leaving terminal", !computera.menu.RemoteMenus.stillValid(remote, first));
                 first.setPos(terminalPos.getX() + 0.5, terminalPos.getY(), terminalPos.getZ() + 0.5);
-                cabinet.wireless().remove(remotePos);
+                cabinet.removeWireless(remotePos);
                 ok &= check(results, "remote menu rejects disconnected device", !computera.menu.RemoteMenus.stillValid(remote, first));
                 cabinet.addWireless(remotePos);
                 level.setBlock(remotePos, Blocks.AIR.defaultBlockState(), 3);
@@ -374,14 +383,19 @@ public final class ComputeraCommands {
                 var uiPlayer = new net.neoforged.neoforge.common.util.FakePlayer(level,
                         new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "AuditMenu")) {
                     @Override
-                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider,
-                            java.util.function.Consumer<net.minecraft.network.RegistryFriendlyByteBuf> writer) {
+                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider) {
                         var menu = menuProvider.createMenu(82, getInventory(), this);
                         if (menu == null) {
                             return java.util.OptionalInt.empty();
                         }
                         containerMenu = menu;
                         return java.util.OptionalInt.of(82);
+                    }
+
+                    @Override
+                    public java.util.OptionalInt openMenu(net.minecraft.world.MenuProvider menuProvider,
+                            java.util.function.Consumer<net.minecraft.network.RegistryFriendlyByteBuf> writer) {
+                        return openMenu(menuProvider);
                     }
                 };
                 uiPlayer.setPos(first.position());
@@ -393,12 +407,19 @@ public final class ComputeraCommands {
                         continue;
                     }
                     level.setBlock(remotePos, block.defaultBlockState(), 3);
+                    cabinet.addWireless(remotePos);
                     String key = DeviceRegistry.positions(level, cluster).entrySet().stream()
                             .filter(entry -> entry.getValue().equals(remotePos)).map(Map.Entry::getKey).findFirst().orElse("");
                     terminal.handleAction(uiPlayer, "logi_open", key, "");
                     var opened = uiPlayer.containerMenu;
-                    ok &= check(results, "logi_open native menu " + blockId,
-                            opened != uiPlayer.inventoryMenu && computera.menu.RemoteMenus.stillValid(opened, uiPlayer));
+                    boolean expectOpen = !blockId.startsWith("ic2:");
+                    if (expectOpen) {
+                        ok &= check(results, "logi_open native menu " + blockId,
+                                opened != uiPlayer.inventoryMenu && computera.menu.RemoteMenus.stillValid(opened, uiPlayer));
+                    } else {
+                        ok &= check(results, "logi_open rejects third-party menu " + blockId,
+                                opened == uiPlayer.inventoryMenu);
+                    }
                     if (opened != uiPlayer.inventoryMenu) {
                         opened.removed(uiPlayer);
                         uiPlayer.containerMenu = uiPlayer.inventoryMenu;
@@ -432,7 +453,7 @@ public final class ComputeraCommands {
             level.setBlock(destPort, ModBlocks.LOGISTICS_PORT.get().defaultBlockState(), 3);
             level.setBlock(destChest, Blocks.CHEST.defaultBlockState(), 3);
             if (level.getBlockEntity(destPort) instanceof computera.blockentity.LogisticsPortBlockEntity port) {
-                port.setFilter("minecraft:diamond");
+                port.setFilter("#c:gems/diamond");
             }
             ClusterManager.invalidate(level, cabinetPos);
             Cluster pipeCluster = ClusterManager.clusterFor(level, cabinetPos);
@@ -442,7 +463,7 @@ public final class ComputeraCommands {
             ResourceHandler<ItemResource> destHandler =
                     level.getCapability(Capabilities.Item.BLOCK, destChest, null);
             long destCount = destHandler == null ? -1 : destHandler.getAmountAsLong(0);
-            ok &= check(results, "pipe moved 4 diamonds", pipeMoved == 4 && destCount == 4);
+            ok &= check(results, "pipe moved 4 diamonds via #tag filter", pipeMoved == 4 && destCount == 4);
 
             level.setBlock(euPos, ModBlocks.EU_ADAPTER.get().defaultBlockState(), 3);
             if (level.getBlockEntity(euPos) instanceof computera.blockentity.EuAdapterBlockEntity adapter) {

@@ -10,7 +10,8 @@ import net.minecraft.resources.Identifier;
 
 import java.util.List;
 
-public record LogisticsStatePayload(BlockPos pos, List<String> devices, String carried)
+public record LogisticsStatePayload(BlockPos pos, List<String> devices, String selectedKey,
+                                    int page, List<String> slots, String carried)
         implements CustomPacketPayload {
     public static final Type<LogisticsStatePayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(Computera.MODID, "logistics_state"));
@@ -19,6 +20,9 @@ public record LogisticsStatePayload(BlockPos pos, List<String> devices, String c
             StreamCodec.composite(
                     BlockPos.STREAM_CODEC, LogisticsStatePayload::pos,
                     ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list()), LogisticsStatePayload::devices,
+                    ByteBufCodecs.STRING_UTF8, LogisticsStatePayload::selectedKey,
+                    ByteBufCodecs.VAR_INT, LogisticsStatePayload::page,
+                    ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list()), LogisticsStatePayload::slots,
                     ByteBufCodecs.STRING_UTF8, LogisticsStatePayload::carried,
                     LogisticsStatePayload::new);
 

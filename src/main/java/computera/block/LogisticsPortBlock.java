@@ -36,8 +36,26 @@ public class LogisticsPortBlock extends Block implements EntityBlock {
     }
 
     @Override
+    protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+        super.onPlace(state, level, pos, oldState, movedByPiston);
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            computera.cluster.ClusterManager.invalidate(serverLevel, pos);
+        }
+    }
+
+    @Override
+    protected void affectNeighborsAfterRemoval(BlockState state, net.minecraft.server.level.ServerLevel level,
+                                               BlockPos pos, boolean movedByPiston) {
+        computera.cluster.ClusterManager.invalidate(level, pos);
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
+    }
+
+    @Override
     protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player,
                                           InteractionHand hand, BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof LogisticsPortBlockEntity port) {
             if (!stack.isEmpty()) {
                 String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();

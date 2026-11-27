@@ -16,6 +16,7 @@ public class EuAdapterBlockEntity extends BlockEntity {
     private final SimpleEnergyHandler energy = new SimpleEnergyHandler(100_000, 10_000, 10_000);
 
     private boolean registered;
+    private long lastTick = Long.MIN_VALUE;
     @Nullable
     private Object port;
 
@@ -35,6 +36,7 @@ public class EuAdapterBlockEntity extends BlockEntity {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
+        lastTick = serverLevel.getGameTime();
         if (!registered && IndustrialCraftEu.available()) {
             connect(serverLevel);
         }
@@ -42,16 +44,22 @@ public class EuAdapterBlockEntity extends BlockEntity {
     }
 
     private void connect(ServerLevel serverLevel) {
-        port = IndustrialCraftEu.createPort(worldPosition, this::isRemoved, fe -> {
-            int amount = (int) Math.min(Integer.MAX_VALUE, Math.max(0, fe));
+        port = IndustrialCraftEu.createPort(worldPosition, this::isRemoved, () -> lastTick, offeredFe -> {
+            int amount = (int) Math.min(Integer.MAX_VALUE, Math.floor(Math.max(0.0, offeredFe)));
             if (amount <= 0) {
-                return;
+                return 0.0;
             }
+            int inserted;
             try (Transaction transaction = Transaction.openRoot()) {
-                energy.insert(amount, transaction);
-                transaction.commit();
+                inserted = energy.insert(amount, transaction);
+                if (inserted > 0) {
+                    transaction.commit();
+                }
+            }
+            if (inserted > 0) {
                 setChanged();
             }
+            return inserted;
         });
         registered = IndustrialCraftEu.register(serverLevel, port);
         if (registered) {
@@ -70,8 +78,14 @@ public class EuAdapterBlockEntity extends BlockEntity {
             if (!serverLevel.hasChunkAt(neighbor)) {
                 continue;
             }
+            if (serverLevel.getBlockEntity(neighbor) instanceof EuAdapterBlockEntity) {
+                continue;
+            }
             targets.add(neighbor);
-            if (serverLevel.getBlockState(neighbor).is(computera.registry.ModBlocks.CABLE.get())) {
+            var neighborState = serverLevel.getBlockState(neighbor);
+            if (neighborState.is(computera.registry.ModBlocks.CABLE.get())
+                    || neighborState.is(computera.registry.ModBlocks.LOGISTICS_PIPE.get())
+                    || neighborState.is(computera.registry.ModBlocks.CABINET.get())) {
                 var cluster = computera.cluster.ClusterManager.clusterFor(serverLevel, neighbor);
                 if (cluster != null) {
                     targets.addAll(cluster.cabinets());
@@ -81,6 +95,12 @@ public class EuAdapterBlockEntity extends BlockEntity {
         for (BlockPos target : targets) {
             if (budget <= 0) {
                 break;
+            }
+            if (target.equals(worldPosition) || !serverLevel.hasChunkAt(target)) {
+                continue;
+            }
+            if (serverLevel.getBlockEntity(target) instanceof EuAdapterBlockEntity) {
+                continue;
             }
             net.minecraft.core.Direction side = null;
             for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
@@ -123,12 +143,24 @@ public class EuAdapterBlockEntity extends BlockEntity {
     }
 
     @Override
+    public void onChunkUnloaded() {
+        if (registered && level instanceof ServerLevel serverLevel) {
+            IndustrialCraftEu.unregister(serverLevel, port);
+        }
+        registered = false;
+        port = null;
+        lastTick = Long.MIN_VALUE;
+        super.onChunkUnloaded();
+    }
+
+    @Override
     public void setRemoved() {
         if (registered && level instanceof ServerLevel serverLevel) {
             IndustrialCraftEu.unregister(serverLevel, port);
         }
         registered = false;
         port = null;
+        lastTick = Long.MIN_VALUE;
         super.setRemoved();
     }
 }

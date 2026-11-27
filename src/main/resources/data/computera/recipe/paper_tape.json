@@ -4,7 +4,7 @@
     "minecraft:paper",
     "minecraft:paper",
     "minecraft:paper",
-    "minecraft:slime_ball"
+    "#c:slime_balls"
   ],
   "result": {
     "id": "computera:paper_tape",

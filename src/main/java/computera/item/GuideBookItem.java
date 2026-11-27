@@ -7,6 +7,14 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
 
 public class GuideBookItem extends Item {
+    private static Runnable clientOpener = () -> {
+    };
+
+    public static void setClientOpener(Runnable opener) {
+        clientOpener = opener == null ? () -> {
+        } : opener;
+    }
+
     public GuideBookItem(Properties properties) {
         super(properties);
     }
@@ -14,7 +22,7 @@ public class GuideBookItem extends Item {
     @Override
     public InteractionResult use(Level level, Player player, InteractionHand hand) {
         if (level.isClientSide()) {
-            computera.client.GuideBookScreen.open();
+            clientOpener.run();
         }
         return InteractionResult.SUCCESS;
     }

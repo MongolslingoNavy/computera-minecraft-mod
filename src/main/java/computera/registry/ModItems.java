@@ -39,21 +39,21 @@ public final class ModItems {
     public static final DeferredItem<ComputeCardItem> COMPUTE_CARD_5 = card("compute_card_5", 5);
 
     public static final DeferredItem<ProgramStorageItem> HARD_DRIVE =
-            ITEMS.registerItem("hard_drive", ProgramStorageItem::new);
+            ITEMS.registerItem("hard_drive", properties -> new ProgramStorageItem(properties.stacksTo(1)));
     public static final DeferredItem<Item> COPPER_WIRE = ITEMS.registerSimpleItem("copper_wire");
     public static final DeferredItem<GuideBookItem> GUIDE_BOOK =
-            ITEMS.registerItem("guide_book", GuideBookItem::new);
+            ITEMS.registerItem("guide_book", properties -> new GuideBookItem(properties.stacksTo(1)));
     public static final DeferredItem<NetworkConnectorItem> NETWORK_CONNECTOR =
-            ITEMS.registerItem("network_connector", NetworkConnectorItem::new);
+            ITEMS.registerItem("network_connector", properties -> new NetworkConnectorItem(properties.stacksTo(1)));
     public static final DeferredItem<Item> BLANK_CARD = ITEMS.registerSimpleItem("blank_card");
     public static final DeferredItem<ProgramStorageItem> PUNCHED_CARD =
-            ITEMS.registerItem("punched_card", ProgramStorageItem::new);
+            ITEMS.registerItem("punched_card", properties -> new ProgramStorageItem(properties.stacksTo(1)));
     public static final DeferredItem<Item> PAPER_TAPE = ITEMS.registerSimpleItem("paper_tape");
     public static final DeferredItem<ProgramStorageItem> FLASH_DRIVE =
-            ITEMS.registerItem("flash_drive", ProgramStorageItem::new);
+            ITEMS.registerItem("flash_drive", properties -> new ProgramStorageItem(properties.stacksTo(1)));
 
     private static DeferredItem<ComputeCardItem> card(String name, int tier) {
-        return ITEMS.registerItem(name, properties -> new ComputeCardItem(properties, tier));
+        return ITEMS.registerItem(name, properties -> new ComputeCardItem(properties.stacksTo(1), tier));
     }
 
     private ModItems() {

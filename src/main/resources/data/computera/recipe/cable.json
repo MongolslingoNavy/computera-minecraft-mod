@@ -1,8 +1,8 @@
 {
   "type": "minecraft:crafting_shapeless",
   "ingredients": [
-    "computera:copper_wire",
-    "minecraft:leather"
+    "#c:wires/copper",
+    "#computera:cable_insulation"
   ],
   "result": {
     "id": "computera:cable",

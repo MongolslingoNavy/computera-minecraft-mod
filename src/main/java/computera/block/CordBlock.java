@@ -73,6 +73,16 @@ public abstract class CordBlock extends Block {
             return;
         }
         refresh(level, pos, state);
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            computera.cluster.ClusterManager.invalidate(serverLevel, pos);
+        }
+    }
+
+    @Override
+    protected void affectNeighborsAfterRemoval(BlockState state, net.minecraft.server.level.ServerLevel level,
+                                               BlockPos pos, boolean movedByPiston) {
+        computera.cluster.ClusterManager.invalidate(level, pos);
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
     }
 
     @Override
@@ -82,6 +92,18 @@ public abstract class CordBlock extends Block {
             return;
         }
         refresh(level, pos, state);
+    }
+
+    @Override
+    protected net.minecraft.world.InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state,
+                                                              Level level, BlockPos pos,
+                                                              net.minecraft.world.entity.player.Player player,
+                                                              net.minecraft.world.InteractionHand hand,
+                                                              net.minecraft.world.phys.BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
+        return super.useItemOn(stack, state, level, pos, player, hand, hitResult);
     }
 
     /**

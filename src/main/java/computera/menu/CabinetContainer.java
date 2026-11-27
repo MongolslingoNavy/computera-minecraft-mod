@@ -101,9 +101,11 @@ public class CabinetContainer implements Container {
 
     @Override
     public boolean stillValid(Player player) {
-        return cabinet != null && player.distanceToSqr(
-                cabinet.getBlockPos().getX() + 0.5,
-                cabinet.getBlockPos().getY() + 0.5,
-                cabinet.getBlockPos().getZ() + 0.5) <= 64.0;
+        return cabinet != null && !cabinet.isRemoved()
+                && player.level().getBlockEntity(cabinet.getBlockPos()) == cabinet
+                && player.distanceToSqr(
+                        cabinet.getBlockPos().getX() + 0.5,
+                        cabinet.getBlockPos().getY() + 0.5,
+                        cabinet.getBlockPos().getZ() + 0.5) <= 64.0;
     }
 }

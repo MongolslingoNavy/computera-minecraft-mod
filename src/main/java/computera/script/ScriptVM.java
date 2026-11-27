@@ -2,6 +2,7 @@ package computera.script;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,10 @@ import java.util.Set;
  */
 public final class ScriptVM {
     private static final int MAX_RECURSION_DEPTH = 256;
-    private static final long RANGE_LIMIT = 1_000_000L;
+    private static final long RANGE_LIMIT = 10_000L;
+    private static final int MAX_STRING_LENGTH = 65_536;
+    private static final int MAX_COLLECTION_SIZE = 10_000;
+    private static final int MAX_EQUALITY_STEPS = 4_096;
     private static final Object DEVICES_MARKER = new Object();
     private static final Set<String> BUILTINS = Set.of(
             "print", "len", "range", "int", "float", "str", "bool", "sleep", "time", "log");
@@ -29,6 +33,7 @@ public final class ScriptVM {
     private boolean finished;
     private boolean sleeping;
     private long sleepUntilMillis;
+    private int extraCost;
 
     public ScriptVM(ScriptProgram program, ScriptHost host) {
         this.program = Objects.requireNonNull(program, "program");
@@ -62,9 +67,13 @@ public final class ScriptVM {
             }
             Instruction instruction = frame.function.code[frame.ip++];
             frame.currentLine = instruction.line;
+            extraCost = 0;
             executed++;
             try {
                 execute(frame, instruction);
+                if (extraCost > 0) {
+                    executed = (int) Math.min((long) maxInstructions, (long) executed + extraCost);
+                }
             } catch (ScriptRuntimeException e) {
                 fail(e);
             } catch (RuntimeException e) {
@@ -128,7 +137,7 @@ public final class ScriptVM {
                 Value value = popValue(frame);
                 storeIndex(base, index, value, instruction.line);
             }
-            case Opcode.BUILD_LIST -> buildList(frame, instruction.a);
+            case Opcode.BUILD_LIST -> buildList(frame, instruction.a, instruction.line);
             case Opcode.BUILD_DICT -> buildDict(frame, instruction.a, instruction.line);
             case Opcode.ITER_INIT -> {
                 Value iterable = popValue(frame);
@@ -185,15 +194,22 @@ public final class ScriptVM {
         }
     }
 
-    private void buildList(Frame frame, int count) {
+    private void buildList(Frame frame, int count, int line) {
+        if (count > MAX_COLLECTION_SIZE) {
+            throw error("MemoryError", "list size limit exceeded (" + MAX_COLLECTION_SIZE + ")", line);
+        }
         Value[] items = new Value[count];
         for (int i = count - 1; i >= 0; i--) {
             items[i] = popValue(frame);
         }
+        extraCost += count;
         frame.push(Value.list(Arrays.asList(items)));
     }
 
     private void buildDict(Frame frame, int count, int line) {
+        if (count > MAX_COLLECTION_SIZE) {
+            throw error("MemoryError", "dictionary size limit exceeded (" + MAX_COLLECTION_SIZE + ")", line);
+        }
         String[] keys = new String[count];
         Value[] values = new Value[count];
         for (int i = count - 1; i >= 0; i--) {
@@ -209,6 +225,7 @@ public final class ScriptVM {
         for (int i = 0; i < count; i++) {
             map.put(keys[i], values[i]);
         }
+        extraCost += count;
         frame.push(Value.map(map));
     }
 
@@ -396,7 +413,12 @@ public final class ScriptVM {
                 throw error("TypeError", "dictionary keys must be strings, not "
                         + index.typeName(), line);
             }
-            container.asMap().put(index.asString(), value);
+            Map<String, Value> map = container.asMap();
+            String key = index.asString();
+            if (!map.containsKey(key) && map.size() >= MAX_COLLECTION_SIZE) {
+                throw error("MemoryError", "dictionary size limit exceeded (" + MAX_COLLECTION_SIZE + ")", line);
+            }
+            map.put(key, value);
             return;
         }
         throw error("TypeError", "'" + container.typeName()
@@ -472,8 +494,8 @@ public final class ScriptVM {
             case FLOORDIV -> floorDivide(left, right, line);
             case MOD -> modulo(left, right, line);
             case POW -> power(left, right, line);
-            case EQ -> Value.of(valuesEqual(left, right));
-            case NE -> Value.of(!valuesEqual(left, right));
+            case EQ -> Value.of(valuesEqual(left, right, line));
+            case NE -> Value.of(!valuesEqual(left, right, line));
             case LT -> compare(left, right, line, Comparison.LT);
             case LE -> compare(left, right, line, Comparison.LE);
             case GT -> compare(left, right, line, Comparison.GT);
@@ -522,7 +544,14 @@ public final class ScriptVM {
             return Value.of(numberAsDouble(left) + numberAsDouble(right));
         }
         if (left.isString() && right.isString()) {
-            return Value.of(left.asString() + right.asString());
+            String a = left.asString();
+            String b = right.asString();
+            long combined = (long) a.length() + (long) b.length();
+            if (combined > MAX_STRING_LENGTH) {
+                throw error("MemoryError", "string length limit exceeded (" + MAX_STRING_LENGTH + ")", line);
+            }
+            extraCost += (int) (combined / 64L);
+            return Value.of(a + b);
         }
         throw error("TypeError", "unsupported operand types for +: '" + left.typeName()
                 + "' and '" + right.typeName() + "'", line);
@@ -655,8 +684,10 @@ public final class ScriptVM {
 
     private boolean contains(Value container, Value needle, int line) {
         if (container.isList()) {
-            for (Value element : container.asList()) {
-                if (valuesEqual(element, needle)) {
+            List<Value> list = container.asList();
+            extraCost += list.size();
+            for (Value element : list) {
+                if (valuesEqual(element, needle, line)) {
                     return true;
                 }
             }
@@ -674,19 +705,31 @@ public final class ScriptVM {
                 throw error("TypeError", "'in <string>' requires a string operand, not "
                         + needle.typeName(), line);
             }
+            extraCost += container.asString().length() / 64;
             return container.asString().contains(needle.asString());
         }
         throw error("TypeError", "'in' requires a list, dict or string on the right, not '"
                 + container.typeName() + "'", line);
     }
 
-    private boolean valuesEqual(Value left, Value right) {
-        return valuesEqual(left, right, 0);
+    private static final class EqualityState {
+        final IdentityHashMap<Object, IdentityHashMap<Object, Boolean>> seen = new IdentityHashMap<>();
+        int remaining = MAX_EQUALITY_STEPS;
     }
 
-    private boolean valuesEqual(Value left, Value right, int depth) {
+    private boolean valuesEqual(Value left, Value right, int line) {
+        EqualityState state = new EqualityState();
+        boolean result = valuesEqual(left, right, 0, state, line);
+        extraCost += (MAX_EQUALITY_STEPS - state.remaining);
+        return result;
+    }
+
+    private boolean valuesEqual(Value left, Value right, int depth, EqualityState state, int line) {
         if (left == right) {
             return true;
+        }
+        if (state.remaining-- <= 0) {
+            throw error("RuntimeError", "equality comparison exceeded complexity limit", line);
         }
         if (depth > 64) {
             return false;
@@ -712,11 +755,21 @@ public final class ScriptVM {
         if (left.isList() && right.isList()) {
             List<Value> a = left.asList();
             List<Value> b = right.asList();
+            if (a == b) {
+                return true;
+            }
             if (a.size() != b.size()) {
                 return false;
             }
+            IdentityHashMap<Object, Boolean> inner = state.seen.computeIfAbsent(a, ignored -> new IdentityHashMap<>());
+            Boolean cached = inner.get(b);
+            if (cached != null) {
+                return cached;
+            }
+            inner.put(b, Boolean.TRUE);
             for (int i = 0; i < a.size(); i++) {
-                if (!valuesEqual(a.get(i), b.get(i), depth + 1)) {
+                if (!valuesEqual(a.get(i), b.get(i), depth + 1, state, line)) {
+                    inner.put(b, Boolean.FALSE);
                     return false;
                 }
             }
@@ -725,11 +778,21 @@ public final class ScriptVM {
         if (left.isMap() && right.isMap()) {
             Map<String, Value> a = left.asMap();
             Map<String, Value> b = right.asMap();
+            if (a == b) {
+                return true;
+            }
             if (!a.keySet().equals(b.keySet())) {
                 return false;
             }
+            IdentityHashMap<Object, Boolean> inner = state.seen.computeIfAbsent(a, ignored -> new IdentityHashMap<>());
+            Boolean cached = inner.get(b);
+            if (cached != null) {
+                return cached;
+            }
+            inner.put(b, Boolean.TRUE);
             for (Map.Entry<String, Value> entry : a.entrySet()) {
-                if (!valuesEqual(entry.getValue(), b.get(entry.getKey()), depth + 1)) {
+                if (!valuesEqual(entry.getValue(), b.get(entry.getKey()), depth + 1, state, line)) {
+                    inner.put(b, Boolean.FALSE);
                     return false;
                 }
             }
@@ -773,7 +836,9 @@ public final class ScriptVM {
                     }
                     builder.append(args[i].display());
                 }
-                host.print(builder.toString());
+                String text = builder.toString();
+                extraCost += text.length() / 64;
+                host.print(text);
                 frame.push(Value.none());
             }
             case "len" -> {
@@ -826,6 +891,7 @@ public final class ScriptVM {
                     throw error("ValueError", "range() result is too large (limit "
                             + RANGE_LIMIT + ")", line);
                 }
+                extraCost += (int) count;
                 List<Value> values = new ArrayList<>((int) count);
                 long current = start;
                 for (long i = 0L; i < count; i++) {
@@ -844,7 +910,9 @@ public final class ScriptVM {
             }
             case "str" -> {
                 requireArity("str", args, 1, 1, line);
-                frame.push(Value.of(args[0].display()));
+                String text = args[0].display();
+                extraCost += text.length() / 64;
+                frame.push(Value.of(text));
             }
             case "bool" -> {
                 requireArity("bool", args, 1, 1, line);

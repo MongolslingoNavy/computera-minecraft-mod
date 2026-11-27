@@ -18,14 +18,50 @@ public class CabinetMenu extends AbstractContainerMenu {
 
     private final BlockPos pos;
     private final CabinetContainer container;
+    private final CabinetBlockEntity cabinet;
+    private int syncedEnergyLow;
+    private int syncedEnergyHigh;
+    private int syncedThreads;
+
+    private final net.minecraft.world.inventory.ContainerData data = new net.minecraft.world.inventory.ContainerData() {
+        @Override
+        public int get(int index) {
+            if (cabinet == null || cabinet.isRemoved()) {
+                return 0;
+            }
+            int energy = cabinet.energy().getAmountAsInt();
+            return switch (index) {
+                case 0 -> energy & 0xFFFF;
+                case 1 -> (energy >>> 16) & 0xFFFF;
+                case 2 -> cabinet.installedThreads();
+                default -> 0;
+            };
+        }
+
+        @Override
+        public void set(int index, int value) {
+            switch (index) {
+                case 0 -> syncedEnergyLow = value & 0xFFFF;
+                case 1 -> syncedEnergyHigh = value & 0xFFFF;
+                case 2 -> syncedThreads = value;
+                default -> {
+                }
+            }
+        }
+
+        @Override
+        public int getCount() {
+            return 3;
+        }
+    };
 
     public CabinetMenu(int containerId, Inventory playerInventory, BlockPos pos) {
         super(ModMenus.CABINET.get(), containerId);
         this.pos = pos;
-        CabinetBlockEntity cabinet = playerInventory.player.level().getBlockEntity(pos) instanceof CabinetBlockEntity c
+        this.cabinet = playerInventory.player.level().getBlockEntity(pos) instanceof CabinetBlockEntity c
                 ? c
                 : null;
-        this.container = new CabinetContainer(cabinet);
+        this.container = new CabinetContainer(this.cabinet);
 
         for (int i = 0; i < CARD_SLOTS; i++) {
             final int slotIndex = i;
@@ -76,10 +112,19 @@ public class CabinetMenu extends AbstractContainerMenu {
         for (int col = 0; col < 9; col++) {
             this.addSlot(new Slot(playerInventory, col, 8 + col * 18, 142));
         }
+        this.addDataSlots(this.data);
     }
 
     public BlockPos pos() {
         return pos;
+    }
+
+    public int syncedEnergy() {
+        return (syncedEnergyHigh << 16) | (syncedEnergyLow & 0xFFFF);
+    }
+
+    public int syncedThreads() {
+        return syncedThreads;
     }
 
     @Override
@@ -115,6 +160,8 @@ public class CabinetMenu extends AbstractContainerMenu {
 
     @Override
     public boolean stillValid(Player player) {
-        return player.distanceToSqr(Vec3.atCenterOf(pos)) <= 64.0;
+        return cabinet != null && !cabinet.isRemoved()
+                && player.level().getBlockEntity(pos) == cabinet
+                && player.distanceToSqr(Vec3.atCenterOf(pos)) <= 64.0;
     }
 }

@@ -48,12 +48,40 @@ public class EuAdapterBlock extends Block implements EntityBlock {
     }
 
     @Override
+    protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
+        super.onPlace(state, level, pos, oldState, movedByPiston);
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            computera.cluster.ClusterManager.invalidate(serverLevel, pos);
+        }
+    }
+
+    @Override
+    protected void affectNeighborsAfterRemoval(BlockState state, net.minecraft.server.level.ServerLevel level,
+                                               BlockPos pos, boolean movedByPiston) {
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
+        computera.cluster.ClusterManager.invalidate(level, pos);
+    }
+
+    @Override
+    protected InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state, Level level,
+                                          BlockPos pos, Player player, net.minecraft.world.InteractionHand hand,
+                                          BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
+        return InteractionResult.TRY_WITH_EMPTY_HAND;
+    }
+
+    @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player,
                                                BlockHitResult hitResult) {
         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof EuAdapterBlockEntity adapter) {
+            String status = !computera.compat.IndustrialCraftEu.available()
+                    ? "not installed"
+                    : (adapter.connected() ? "connected" : "disconnected");
             player.sendSystemMessage(Component.literal(
                     "[Computera] EU adapter: FE=" + adapter.energy().getAmountAsLong()
-                            + " IC2=" + (computera.compat.IndustrialCraftEu.available() ? "connected" : "not installed")));
+                            + " IC2=" + status));
         }
         return InteractionResult.SUCCESS;
     }

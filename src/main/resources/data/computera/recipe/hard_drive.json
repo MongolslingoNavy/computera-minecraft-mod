@@ -6,10 +6,10 @@
     "IXI"
   ],
   "key": {
-    "I": "minecraft:iron_ingot",
-    "X": "computera:copper_wire",
-    "Q": "minecraft:redstone",
-    "G": "minecraft:glass"
+    "I": "#c:ingots/iron",
+    "X": "#c:wires/copper",
+    "Q": "#c:dusts/redstone",
+    "G": "#c:glass_blocks"
   },
   "result": {
     "id": "computera:hard_drive",

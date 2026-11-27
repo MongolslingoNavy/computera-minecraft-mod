@@ -11,7 +11,8 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
-import java.util.function.DoubleConsumer;
+import java.util.function.DoubleUnaryOperator;
+import java.util.function.LongSupplier;
 
 /**
  * Optional IC2: The New Era electricity bridge. IC2's EU grid is not exposed through
@@ -52,7 +53,8 @@ public final class IndustrialCraftEu {
         return available;
     }
 
-    public static Object createPort(BlockPos pos, BooleanSupplier removed, DoubleConsumer feSink) {
+    public static Object createPort(BlockPos pos, BooleanSupplier removed, LongSupplier lastTick,
+                                    DoubleUnaryOperator feSink) {
         if (!available()) {
             return null;
         }
@@ -65,15 +67,25 @@ public final class IndustrialCraftEu {
                     return removed.getAsBoolean();
                 }
                 case "ranThisTick" -> {
-                    return true;
+                    if (removed.getAsBoolean() || args == null || args.length == 0
+                            || !(args[0] instanceof ServerLevel serverLevel)) {
+                        return false;
+                    }
+                    return lastTick.getAsLong() == serverLevel.getGameTime();
                 }
                 case "energyPorts" -> {
                     return portFaces;
                 }
                 case "receive" -> {
                     double offered = (double) args[0];
-                    feSink.accept(offered * FE_PER_EU);
-                    return offered;
+                    if (!Double.isFinite(offered) || offered <= 0.0) {
+                        return 0.0;
+                    }
+                    double acceptedFe = feSink.applyAsDouble(offered * FE_PER_EU);
+                    if (!Double.isFinite(acceptedFe) || acceptedFe <= 0.0) {
+                        return 0.0;
+                    }
+                    return Math.min(offered, acceptedFe / FE_PER_EU);
                 }
                 case "packetLimit" -> {
                     return PACKET_LIMIT;

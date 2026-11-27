@@ -1,0 +1,10 @@
+{
+  "computera:devices": {
+    "entrypoints": {
+      "common": "computera.compat.ComputeraWthitCommonPlugin",
+      "client": "computera.compat.ComputeraWthitClientPlugin"
+    },
+    "side": "*",
+    "required": []
+  }
+}

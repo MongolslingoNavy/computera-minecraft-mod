@@ -24,13 +24,8 @@ public class CabinetScreen extends AbstractContainerScreen<CabinetMenu> {
         graphics.fill(x, y, x + 2, y + imageHeight, 0xFF8B8B8B);
         graphics.fill(x + imageWidth - 2, y, x + imageWidth, y + imageHeight, 0xFF8B8B8B);
 
-        if (Minecraft.getInstance().level != null
-                && Minecraft.getInstance().level.getBlockEntity(menu.pos())
-                        instanceof computera.blockentity.CabinetBlockEntity cabinet) {
-            graphics.text(this.font, "FE " + cabinet.energy().getAmountAsLong()
-                            + "  threads " + cabinet.installedThreads(),
-                    x + 8, y + 64, 0xFF404040, false);
-        }
+        graphics.text(this.font, "FE " + menu.syncedEnergy() + "  threads " + menu.syncedThreads(),
+                x + 8, y + 64, 0xFF404040, false);
 
         for (Slot slot : this.menu.slots) {
             int sx = x + slot.x;

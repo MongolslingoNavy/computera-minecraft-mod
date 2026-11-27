@@ -4,7 +4,7 @@
     "minecraft:paper",
     "minecraft:paper",
     "minecraft:paper",
-    "minecraft:redstone"
+    "#c:dusts/redstone"
   ],
   "result": {
     "id": "computera:blank_card",

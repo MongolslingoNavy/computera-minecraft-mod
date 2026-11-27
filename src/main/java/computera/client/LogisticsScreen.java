@@ -32,7 +32,7 @@ public class LogisticsScreen extends Screen {
     private record SlotView(String id, long count) {
     }
 
-    private record DeviceView(String key, String alias, String group, String posText, List<SlotView> slots) {
+    private record DeviceView(String key, String alias, String group, String posText, int slotCount) {
     }
 
     private static String lastKey;
@@ -43,8 +43,10 @@ public class LogisticsScreen extends Screen {
     private static String lastGroup;
     private final List<DeviceView> allDevices = new ArrayList<>();
     private final List<DeviceView> devices = new ArrayList<>();
+    private final List<SlotView> pageSlots = new ArrayList<>();
+    private String serverSelectedKey = "";
     private String groupFilter;
-    private final Set<String> distributeTargets = new HashSet<>();
+    private final Set<String> distributeTargets = new java.util.LinkedHashSet<>();
     private ItemStack carried = ItemStack.EMPTY;
 
     private int left;
@@ -57,7 +59,7 @@ public class LogisticsScreen extends Screen {
     private boolean giveMode;
     private int giveAmount = 16;
     private String giveRefId;
-    private int sourceDevice = -1;
+    private String sourceDeviceKey;
     private int sourceSlot = -1;
     private EditBox renameBox;
     private EditBox groupBox;
@@ -67,48 +69,51 @@ public class LogisticsScreen extends Screen {
     private static final int[] FOOTER_W = {60, 60, 60, 52, 52, 60};
     private static final int[] GIVE_STEPS = {1, 2, 4, 8, 16, 32, 64};
 
-    public LogisticsScreen(BlockPos pos, List<String> rawDevices, String carriedText) {
+    public LogisticsScreen(BlockPos pos, List<String> rawDevices, String selectedKey,
+                           int serverPage, List<String> rawSlots, String carriedText) {
         super(Component.translatable("computera.gui.logi.title"));
         this.pos = pos;
+        this.serverSelectedKey = selectedKey == null ? "" : selectedKey;
         for (String line : rawDevices) {
             String[] parts = line.split("\\|", 5);
             if (parts.length != 5) {
                 continue;
             }
-            List<SlotView> slots = new ArrayList<>();
-            if (!parts[4].isEmpty()) {
-                for (String cell : parts[4].split(",", -1)) {
-                    if (cell.equals("-")) {
-                        slots.add(null);
-                    } else {
-                        String[] sc = cell.split("=", 2);
-                        try {
-                            slots.add(new SlotView(sc[0], Long.parseLong(sc[1])));
-                        } catch (RuntimeException e) {
-                            slots.add(null);
-                        }
+            int slotCount = 0;
+            try {
+                slotCount = Math.max(0, Integer.parseInt(parts[4].trim()));
+            } catch (NumberFormatException ignored) {
+            }
+            allDevices.add(new DeviceView(parts[0], parts[1], parts[2], parts[3], slotCount));
+        }
+        if (rawSlots != null) {
+            for (String cell : rawSlots) {
+                if (cell == null || cell.isEmpty() || cell.equals("-")) {
+                    pageSlots.add(null);
+                } else {
+                    String[] sc = cell.split("=", 2);
+                    try {
+                        pageSlots.add(new SlotView(sc[0], Long.parseLong(sc[1])));
+                    } catch (RuntimeException e) {
+                        pageSlots.add(null);
                     }
                 }
             }
-            allDevices.add(new DeviceView(parts[0], parts[1], parts[2], parts[3], slots));
         }
         groupFilter = lastGroup;
-        applyFilter();
-        if (lastKey != null) {
-            for (int i = 0; i < devices.size(); i++) {
-                if (devices.get(i).key().equals(lastKey)) {
-                    selected = i;
-                    break;
-                }
-            }
+        if (!this.serverSelectedKey.isEmpty()) {
+            lastKey = this.serverSelectedKey;
         }
-        page = Math.max(0, lastPage);
+        applyFilter();
+        page = Math.max(0, Math.min(Math.max(0, serverPage), pageCount() - 1));
+        lastPage = page;
         tabOffset = Math.max(0, lastTabOffset);
 
         if (carriedText != null && !carriedText.isEmpty()) {
             String[] cc = carriedText.split("=", 2);
-            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(cc[0]));
-            if (item != null) {
+            Identifier parsedId = Identifier.tryParse(cc[0]);
+            Item item = parsedId == null ? null : BuiltInRegistries.ITEM.getValue(parsedId);
+            if (item != null && item != net.minecraft.world.item.Items.AIR) {
                 int count = 1;
                 try {
                     count = Integer.parseInt(cc[1]);
@@ -143,7 +148,7 @@ public class LogisticsScreen extends Screen {
         if (devices.isEmpty() || selected >= devices.size()) {
             return 1;
         }
-        return Math.max(1, (devices.get(selected).slots().size() + PAGE - 1) / PAGE);
+        return Math.max(1, (devices.get(selected).slotCount() + PAGE - 1) / PAGE);
     }
 
     @Override
@@ -151,13 +156,13 @@ public class LogisticsScreen extends Screen {
         left = (this.width - WIDTH) / 2;
         top = (this.height - HEIGHT) / 2;
 
-        renameBox = new EditBox(this.font, left + 34, top + 44, 90, 14,
+        renameBox = new EditBox(this.font, left + 36, top + 44, 78, 14,
                 Component.translatable("computera.gui.logi.rename"));
         renameBox.setMaxLength(32);
         renameBox.setValue(selectedAlias());
         this.addRenderableWidget(renameBox);
 
-        groupBox = new EditBox(this.font, left + 168, top + 44, 66, 14,
+        groupBox = new EditBox(this.font, left + 188, top + 44, 62, 14,
                 Component.translatable("computera.gui.logi.group"));
         groupBox.setMaxLength(16);
         groupBox.setValue(devices.isEmpty() ? "" : devices.get(Math.min(selected, devices.size() - 1)).group());
@@ -165,6 +170,17 @@ public class LogisticsScreen extends Screen {
 
         page = Math.min(page, pageCount() - 1);
         tabOffset = Math.min(tabOffset, Math.max(0, devices.size() - MAX_TABS));
+    }
+
+    private void requestSelectedPage() {
+        if (devices.isEmpty() || selected >= devices.size()) {
+            return;
+        }
+        DeviceView device = devices.get(selected);
+        lastKey = device.key();
+        lastPage = page;
+        lastTabOffset = tabOffset;
+        send("logi_select", device.key(), String.valueOf(page));
     }
 
     private void applyFilter() {
@@ -213,6 +229,11 @@ public class LogisticsScreen extends Screen {
         groupFilter = options.get(next);
         lastGroup = groupFilter;
         applyFilter();
+        if (renameBox != null && groupBox != null) {
+            renameBox.setValue(selectedAlias());
+            groupBox.setValue(devices.isEmpty() ? "" : devices.get(Math.min(selected, devices.size() - 1)).group());
+        }
+        requestSelectedPage();
     }
 
     private String selectedAlias() {
@@ -289,7 +310,7 @@ public class LogisticsScreen extends Screen {
             moveMode = !moveMode;
             distributeMode = false;
             giveMode = false;
-            sourceDevice = -1;
+            sourceDeviceKey = null;
             sourceSlot = -1;
             syncEditBoxes();
             return true;
@@ -305,13 +326,13 @@ public class LogisticsScreen extends Screen {
             giveMode = !giveMode;
             moveMode = false;
             distributeMode = false;
-            sourceDevice = -1;
+            sourceDeviceKey = null;
             sourceSlot = -1;
             syncEditBoxes();
             return true;
         }
         if (inside(mx, my, left + FOOTER_X[3], top + FOOTER_Y, FOOTER_W[3], 16)) {
-            send("logi", "", "");
+            requestSelectedPage();
             return true;
         }
         if (inside(mx, my, left + FOOTER_X[4], top + FOOTER_Y, FOOTER_W[4], 16)) {
@@ -342,13 +363,13 @@ public class LogisticsScreen extends Screen {
                 return true;
             }
         } else {
-            if (inside(mx, my, left + 128, top + 44, 36, 14)) {
+            if (inside(mx, my, left + 116, top + 44, 38, 14)) {
                 if (!devices.isEmpty() && selected < devices.size()) {
                     send("logi_rename", devices.get(selected).key(), renameBox.getValue());
                 }
                 return true;
             }
-            if (inside(mx, my, left + 238, top + 44, 30, 14)) {
+            if (inside(mx, my, left + 252, top + 44, 34, 14)) {
                 if (!devices.isEmpty() && selected < devices.size()) {
                     String group = groupBox.getValue().isBlank() ? "" : groupBox.getValue();
                     send("logi_group", devices.get(selected).key(), group);
@@ -356,7 +377,7 @@ public class LogisticsScreen extends Screen {
                 }
                 return true;
             }
-            if (inside(mx, my, left + 272, top + 44, 70, 14)) {
+            if (inside(mx, my, left + 290, top + 44, 76, 14)) {
                 cycleGroup();
                 return true;
             }
@@ -391,9 +412,11 @@ public class LogisticsScreen extends Screen {
                     lastPage = 0;
                     lastTabOffset = tabOffset;
                     moveMode = false;
-                    sourceDevice = -1;
+                    sourceDeviceKey = null;
                     sourceSlot = -1;
                     renameBox.setValue(device.alias());
+                    groupBox.setValue(device.group());
+                    requestSelectedPage();
                 }
                 return true;
             }
@@ -403,14 +426,14 @@ public class LogisticsScreen extends Screen {
         if (inside(mx, my, left + 150, top + 60, 13, 14)) {
             if (page > 0) {
                 page--;
-                lastPage = page;
+                requestSelectedPage();
             }
             return true;
         }
         if (inside(mx, my, left + 190, top + 60, 13, 14)) {
             if (page + 1 < pageCount()) {
                 page++;
-                lastPage = page;
+                requestSelectedPage();
             }
             return true;
         }
@@ -420,9 +443,10 @@ public class LogisticsScreen extends Screen {
         int row = (int) ((my - containerY()) / CELL);
         if (col >= 0 && col < COLS && row >= 0 && row < ROWS && !devices.isEmpty()) {
             DeviceView device = devices.get(Math.min(selected, devices.size() - 1));
-            int slot = page * PAGE + row * COLS + col;
-            if (slot < device.slots().size()) {
-                containerClick(device, slot, button);
+            int localSlot = row * COLS + col;
+            int slot = page * PAGE + localSlot;
+            if (slot < device.slotCount()) {
+                containerClick(device, slot, localSlot, button);
                 return true;
             }
         }
@@ -443,9 +467,10 @@ public class LogisticsScreen extends Screen {
         return false;
     }
 
-    private void containerClick(DeviceView device, int slot, int button) {
+    private void containerClick(DeviceView device, int slot, int localSlot, int button) {
         if (giveMode) {
-            SlotView view = slot < device.slots().size() ? device.slots().get(slot) : null;
+            SlotView view = device.key().equals(serverSelectedKey) && localSlot >= 0 && localSlot < pageSlots.size()
+                    ? pageSlots.get(localSlot) : null;
             giveRefId = view == null ? null : view.id();
             return;
         }
@@ -455,19 +480,19 @@ public class LogisticsScreen extends Screen {
         }
         if (distributeMode) {
             if (!distributeTargets.isEmpty()) {
-                send("logi_distribute", String.join(",", distributeTargets), String.valueOf(slot));
+                send("logi_distribute", device.key() + "|" + String.join(",", distributeTargets), String.valueOf(slot));
             }
             return;
         }
         if (moveMode) {
-            if (sourceDevice < 0) {
-                sourceDevice = selected;
+            if (sourceDeviceKey == null) {
+                sourceDeviceKey = device.key();
                 sourceSlot = slot;
-            } else if (sourceDevice != selected || sourceSlot != slot) {
-                String spec = devices.get(sourceDevice).key() + ":" + sourceSlot + ">" + device.key() + ":" + slot;
+            } else if (!sourceDeviceKey.equals(device.key()) || sourceSlot != slot) {
+                String spec = sourceDeviceKey + ":" + sourceSlot + ">" + device.key() + ":" + slot;
                 send("logi_move", spec, "64");
                 moveMode = false;
-                sourceDevice = -1;
+                sourceDeviceKey = null;
                 sourceSlot = -1;
             }
             return;
@@ -492,8 +517,11 @@ public class LogisticsScreen extends Screen {
         if (mouseX >= containerX() && mouseX < containerX() + COLS * CELL
                 && mouseY >= containerY() && mouseY < containerY() + ROWS * CELL) {
             if (pageCount() > 1) {
-                page = Math.max(0, Math.min(pageCount() - 1, page + (scrollY < 0 ? 1 : -1)));
-                lastPage = page;
+                int nextPage = Math.max(0, Math.min(pageCount() - 1, page + (scrollY < 0 ? 1 : -1)));
+                if (nextPage != page) {
+                    page = nextPage;
+                    requestSelectedPage();
+                }
                 return true;
             }
         }
@@ -543,14 +571,16 @@ public class LogisticsScreen extends Screen {
         } else {
             graphics.text(this.font, Component.translatable("computera.gui.logi.rename"),
                     left + 10, top + 47, 0xFF5F8A6A, false);
-            drawButton(graphics, left + 128, top + 44, 36, 14,
+            drawButton(graphics, left + 116, top + 44, 38, 14,
                     Component.translatable("computera.gui.logi.apply"), mouseX, mouseY);
             graphics.text(this.font, Component.translatable("computera.gui.logi.group"),
-                    left + 154, top + 47, 0xFF5F8A6A, false);
-            drawButton(graphics, left + 238, top + 44, 30, 14,
+                    left + 158, top + 47, 0xFF5F8A6A, false);
+            drawButton(graphics, left + 252, top + 44, 34, 14,
                     Component.translatable("computera.gui.logi.setgroup"), mouseX, mouseY);
-            drawButton(graphics, left + 272, top + 44, 70, 14,
-                    Component.literal(groupFilter == null ? "全部" : groupFilter), mouseX, mouseY);
+            drawButton(graphics, left + 290, top + 44, 76, 14,
+                    groupFilter == null
+                            ? Component.translatable("computera.gui.logi.all")
+                            : Component.literal(groupFilter), mouseX, mouseY);
         }
 
         if (devices.isEmpty()) {
@@ -628,7 +658,7 @@ public class LogisticsScreen extends Screen {
         drawButton(graphics, left + 316, top + 44, 46, 14,
                 Component.translatable("computera.gui.logi.give.send"), mouseX, mouseY);
         drawButton(graphics, left + 366, top + 44, 42, 14,
-                Component.literal("clear"), mouseX, mouseY);
+                Component.translatable("computera.gui.logi.give.clear"), mouseX, mouseY);
     }
 
     private void drawContainer(GuiGraphicsExtractor graphics) {
@@ -636,17 +666,19 @@ public class LogisticsScreen extends Screen {
         int offset = page * PAGE;
         int gx = containerX();
         int gy = containerY();
+        boolean matchesServer = device.key().equals(serverSelectedKey);
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
-                int slot = offset + row * COLS + col;
-                if (slot >= device.slots().size()) {
+                int localSlot = row * COLS + col;
+                int slot = offset + localSlot;
+                if (slot >= device.slotCount()) {
                     continue;
                 }
                 int x = gx + col * CELL;
                 int y = gy + row * CELL;
-                boolean isSource = sourceDevice == selected && sourceSlot == slot;
+                boolean isSource = device.key().equals(sourceDeviceKey) && sourceSlot == slot;
                 drawSlot(graphics, x, y, isSource);
-                SlotView view = device.slots().get(slot);
+                SlotView view = matchesServer && localSlot < pageSlots.size() ? pageSlots.get(localSlot) : null;
                 if (view != null) {
                     drawItem(graphics, view.id(), view.count(), x, y);
                 }

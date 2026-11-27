@@ -6,9 +6,9 @@
     "GIG"
   ],
   "key": {
-    "G": "minecraft:glass",
-    "X": "computera:copper_wire",
-    "I": "minecraft:iron_ingot"
+    "G": "#c:glass_blocks",
+    "X": "#c:wires/copper",
+    "I": "#c:ingots/iron"
   },
   "result": {
     "id": "computera:display_panel",

@@ -129,6 +129,9 @@ public class DisplayPanelBlock extends BaseEntityBlock {
     protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean movedByPiston) {
         super.onPlace(state, level, pos, oldState, movedByPiston);
         DisplayPanelBlockEntity.refreshAround(level, pos);
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            computera.cluster.ClusterManager.invalidate(serverLevel, pos);
+        }
     }
 
     @Override
@@ -143,6 +146,8 @@ public class DisplayPanelBlock extends BaseEntityBlock {
         for (Direction direction : Direction.values()) {
             DisplayPanelBlockEntity.refreshAround(level, pos.relative(direction));
         }
+        computera.cluster.ClusterManager.invalidate(level, pos);
+        super.affectNeighborsAfterRemoval(state, level, pos, movedByPiston);
     }
 
     @Override
@@ -162,6 +167,9 @@ public class DisplayPanelBlock extends BaseEntityBlock {
     @Override
     protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
                                           Player player, InteractionHand hand, BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
         return InteractionResult.TRY_WITH_EMPTY_HAND;
     }
 }

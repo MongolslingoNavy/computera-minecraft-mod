@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 
 final class Compiler {
+    private static final int MAX_DEPTH = 128;
+
     private record LoopContext(CodeBuilder.Label breakTarget, CodeBuilder.Label continueTarget) {
     }
 
@@ -21,6 +23,7 @@ final class Compiler {
 
     private CodeBuilder code;
     private boolean inFunction;
+    private int depth;
     private Deque<LoopContext> loops = new ArrayDeque<>();
 
     Compiler(String filename) {
@@ -41,6 +44,18 @@ final class Compiler {
     }
 
     private void compileStatement(Ast.Stmt statement) throws ScriptCompileException {
+        if (++depth > MAX_DEPTH) {
+            depth--;
+            throw error(statement.line(), statement.column(), "nesting depth limit exceeded (" + MAX_DEPTH + ")");
+        }
+        try {
+            compileStatementBody(statement);
+        } finally {
+            depth--;
+        }
+    }
+
+    private void compileStatementBody(Ast.Stmt statement) throws ScriptCompileException {
         if (statement instanceof Ast.ExprStmt s) {
             compileExpr(s.expr());
             code.emit(Opcode.POP, 0, 0, s.line());
@@ -226,6 +241,18 @@ final class Compiler {
     }
 
     private void compileExpr(Ast.Expr expr) throws ScriptCompileException {
+        if (++depth > MAX_DEPTH) {
+            depth--;
+            throw error(expr.line(), expr.column(), "nesting depth limit exceeded (" + MAX_DEPTH + ")");
+        }
+        try {
+            compileExprBody(expr);
+        } finally {
+            depth--;
+        }
+    }
+
+    private void compileExprBody(Ast.Expr expr) throws ScriptCompileException {
         if (expr instanceof Ast.Literal literal) {
             emitConstant(literal.value(), literal.line());
             return;

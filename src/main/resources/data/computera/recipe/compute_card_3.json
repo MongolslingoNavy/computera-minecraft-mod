@@ -6,8 +6,8 @@
     "DAD"
   ],
   "key": {
-    "D": "minecraft:diamond",
-    "A": "minecraft:amethyst_shard",
+    "D": "#c:gems/diamond",
+    "A": "#c:gems/amethyst",
     "C": "computera:compute_card_2"
   },
   "result": {

@@ -6,7 +6,7 @@
     "SES"
   ],
   "key": {
-    "S": "minecraft:nether_star",
+    "S": "#c:nether_stars",
     "E": "minecraft:echo_shard",
     "C": "computera:compute_card_4"
   },

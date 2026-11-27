@@ -1,6 +1,7 @@
 package computera.script;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,8 +163,20 @@ public final class Value {
         };
     }
 
+    public static final int MAX_FORMAT_CHARS = 16_384;
+    private static final int MAX_FORMAT_NODES = 4_096;
+
+    private static final class FormatState {
+        final IdentityHashMap<Object, Boolean> active = new IdentityHashMap<>();
+        int remainingNodes = MAX_FORMAT_NODES;
+        boolean truncated;
+    }
+
     public String display() {
-        return format(false, 0);
+        StringBuilder builder = new StringBuilder();
+        FormatState state = new FormatState();
+        format(false, 0, state, builder);
+        return builder.toString();
     }
 
     @Override
@@ -171,42 +184,90 @@ public final class Value {
         return display();
     }
 
-    private String format(boolean nested, int depth) {
-        if (depth > 64) {
-            return "...";
+    private void format(boolean nested, int depth, FormatState state, StringBuilder builder) {
+        if (state.truncated || builder.length() >= MAX_FORMAT_CHARS) {
+            state.truncated = true;
+            return;
         }
-        return switch (kind) {
-            case INT -> Long.toString(intValue);
-            case FLOAT -> formatDouble(floatValue);
-            case BOOL -> boolValue ? "True" : "False";
-            case STRING -> nested ? quote((String) objectValue) : (String) objectValue;
-            case NONE -> "None";
+        if (depth > 64 || state.remainingNodes-- <= 0) {
+            builder.append("...");
+            if (state.remainingNodes < 0) {
+                state.truncated = true;
+            }
+            return;
+        }
+        switch (kind) {
+            case INT -> builder.append(intValue);
+            case FLOAT -> builder.append(formatDouble(floatValue));
+            case BOOL -> builder.append(boolValue ? "True" : "False");
+            case STRING -> {
+                String text = (String) objectValue;
+                String rendered = nested ? quote(text) : text;
+                int room = MAX_FORMAT_CHARS - builder.length();
+                if (rendered.length() > room) {
+                    if (room > 3) {
+                        builder.append(rendered, 0, room - 3).append("...");
+                    } else {
+                        builder.append("...");
+                    }
+                    state.truncated = true;
+                } else {
+                    builder.append(rendered);
+                }
+            }
+            case NONE -> builder.append("None");
             case LIST -> {
                 List<Value> values = asList();
-                StringBuilder builder = new StringBuilder("[");
-                for (int i = 0; i < values.size(); i++) {
-                    if (i > 0) {
-                        builder.append(", ");
-                    }
-                    builder.append(values.get(i).format(true, depth + 1));
+                if (state.active.put(values, Boolean.TRUE) != null) {
+                    builder.append("[...]");
+                    return;
                 }
-                yield builder.append(']').toString();
+                try {
+                    builder.append('[');
+                    for (int i = 0; i < values.size(); i++) {
+                        if (state.truncated || builder.length() >= MAX_FORMAT_CHARS) {
+                            builder.append(", ...");
+                            state.truncated = true;
+                            break;
+                        }
+                        if (i > 0) {
+                            builder.append(", ");
+                        }
+                        values.get(i).format(true, depth + 1, state, builder);
+                    }
+                    builder.append(']');
+                } finally {
+                    state.active.remove(values);
+                }
             }
             case MAP -> {
                 Map<String, Value> values = asMap();
-                StringBuilder builder = new StringBuilder("{");
-                boolean first = true;
-                for (Map.Entry<String, Value> entry : values.entrySet()) {
-                    if (!first) {
-                        builder.append(", ");
-                    }
-                    first = false;
-                    builder.append(quote(entry.getKey())).append(": ")
-                            .append(entry.getValue().format(true, depth + 1));
+                if (state.active.put(values, Boolean.TRUE) != null) {
+                    builder.append("{...}");
+                    return;
                 }
-                yield builder.append('}').toString();
+                try {
+                    builder.append('{');
+                    boolean first = true;
+                    for (Map.Entry<String, Value> entry : values.entrySet()) {
+                        if (state.truncated || builder.length() >= MAX_FORMAT_CHARS) {
+                            builder.append(", ...");
+                            state.truncated = true;
+                            break;
+                        }
+                        if (!first) {
+                            builder.append(", ");
+                        }
+                        first = false;
+                        builder.append(quote(entry.getKey())).append(": ");
+                        entry.getValue().format(true, depth + 1, state, builder);
+                    }
+                    builder.append('}');
+                } finally {
+                    state.active.remove(values);
+                }
             }
-        };
+        }
     }
 
     private static String formatDouble(double value) {

@@ -95,19 +95,22 @@ public class DisplayPanelBlockEntity extends BlockEntity {
         }
     }
 
-    /** Right click: behave like a CRT terminal, using the nearest terminal of the cluster. */
+    /** Right click: behave like a CRT terminal, using the nearest terminal of the cluster (preferring CRT). */
     public void openFor(ServerPlayer player) {
         DisplayPanelBlockEntity target = controller();
         Cluster cluster = target.findCluster();
-        if (cluster != null) {
+        if (cluster != null && level instanceof ServerLevel serverLevel) {
             TerminalBlockEntity best = null;
+            boolean bestIsCrt = false;
             double bestDistance = Double.MAX_VALUE;
             for (BlockPos pos : cluster.terminals()) {
-                if (level.getBlockEntity(pos) instanceof TerminalBlockEntity terminal) {
+                if (serverLevel.hasChunkAt(pos) && serverLevel.getBlockEntity(pos) instanceof TerminalBlockEntity terminal) {
+                    boolean isCrt = terminal.kind() == computera.block.TerminalKind.CRT;
                     double distance = pos.distSqr(target.worldPosition);
-                    if (distance < bestDistance) {
+                    if (best == null || (isCrt && !bestIsCrt) || (isCrt == bestIsCrt && distance < bestDistance)) {
                         bestDistance = distance;
                         best = terminal;
+                        bestIsCrt = isCrt;
                     }
                 }
             }
@@ -128,12 +131,16 @@ public class DisplayPanelBlockEntity extends BlockEntity {
                 target.lines, target.itemEntries, target.deviceEntries));
     }
 
-    private DisplayPanelBlockEntity controller() {
-        if (isController() || level == null) {
+    public DisplayPanelBlockEntity controller() {
+        if (isController() || level == null || !level.hasChunkAt(controllerPos)) {
             return this;
         }
         return level.getBlockEntity(controllerPos) instanceof DisplayPanelBlockEntity controller
                 ? controller : this;
+    }
+
+    public Cluster linkedCluster() {
+        return controller().findCluster();
     }
 
     private Cluster findCluster() {
@@ -161,6 +168,9 @@ public class DisplayPanelBlockEntity extends BlockEntity {
 
     /** Rebuilds the merge result for every panel of the wall containing {@code origin}. */
     public static void refreshWall(ServerLevel level, BlockPos origin) {
+        if (!level.hasChunkAt(origin)) {
+            return;
+        }
         BlockState originState = level.getBlockState(origin);
         if (!(originState.getBlock() instanceof DisplayPanelBlock)) {
             return;
@@ -177,7 +187,7 @@ public class DisplayPanelBlockEntity extends BlockEntity {
 
         while (!queue.isEmpty() && members.size() < MAX_PANELS) {
             BlockPos pos = queue.poll();
-            if (!members.add(pos)) {
+            if (!level.hasChunkAt(pos) || !members.add(pos)) {
                 continue;
             }
             BlockState state = level.getBlockState(pos);
@@ -201,7 +211,8 @@ public class DisplayPanelBlockEntity extends BlockEntity {
                 }
             }
         }
-        members.removeIf(pos -> !(level.getBlockState(pos).getBlock() instanceof DisplayPanelBlock));
+        members.removeIf(pos -> !level.hasChunkAt(pos)
+                || !(level.getBlockState(pos).getBlock() instanceof DisplayPanelBlock));
 
         int width = alongX ? maxX - minX + 1 : maxZ - minZ + 1;
         int height = maxY - minY + 1;
@@ -225,6 +236,7 @@ public class DisplayPanelBlockEntity extends BlockEntity {
             if (!(level.getBlockEntity(pos) instanceof DisplayPanelBlockEntity panel)) {
                 continue;
             }
+            panel.linkAnchor = null;
             int nextW = rectangular ? width : 1;
             int nextH = rectangular ? height : 1;
             BlockPos nextController = rectangular ? controller : pos;
@@ -260,13 +272,17 @@ public class DisplayPanelBlockEntity extends BlockEntity {
     }
 
     private void computeStats(List<String> lines, List<String> items, List<String> devices) {
-        lines.add("网络状态");
+        lines.add("@title");
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
         Cluster cluster = null;
         for (Direction direction : Direction.values()) {
-            cluster = ClusterManager.clusterFor(serverLevel, worldPosition.relative(direction));
+            BlockPos adjacent = worldPosition.relative(direction);
+            if (!serverLevel.hasChunkAt(adjacent)) {
+                continue;
+            }
+            cluster = ClusterManager.clusterFor(serverLevel, adjacent);
             if (cluster != null) {
                 break;
             }
@@ -275,7 +291,7 @@ public class DisplayPanelBlockEntity extends BlockEntity {
             cluster = findClusterInWall(serverLevel);
         }
         if (cluster == null) {
-            lines.add("未接入集群");
+            lines.add("@offline");
             return;
         }
 
@@ -284,12 +300,13 @@ public class DisplayPanelBlockEntity extends BlockEntity {
         int containers = 0;
         int running = 0;
         java.util.Map<String, Long> itemCounts = new java.util.LinkedHashMap<>();
-        java.util.List<java.util.Map.Entry<String, Long>> deviceTotals = new java.util.ArrayList<>();
         java.util.List<String> deviceEntriesRaw = new java.util.ArrayList<>();
 
-        for (var entry : computera.device.DeviceRegistry.positions(serverLevel, cluster).entrySet()) {
-            var handler = serverLevel.getCapability(
-                    net.neoforged.neoforge.capabilities.Capabilities.Item.BLOCK, entry.getValue(), null);
+        for (var entry : computera.device.DeviceRegistry.entries(serverLevel, cluster).values()) {
+            if (entry.fluid()) {
+                continue;
+            }
+            var handler = computera.device.DeviceRegistry.itemHandler(serverLevel, entry);
             if (handler == null) {
                 continue;
             }
@@ -310,20 +327,21 @@ public class DisplayPanelBlockEntity extends BlockEntity {
                 containerTotal += amount;
             }
             totalItems += containerTotal;
-            boolean isRunning = isMachineRunning(serverLevel, entry.getValue());
+            boolean isRunning = isMachineRunning(serverLevel, entry.pos());
             if (isRunning) {
                 running++;
             }
-            String name = cabinet == null ? entry.getKey() : cabinet.alias(entry.getKey());
-            if (name == null || name.isBlank()) {
-                name = entry.getKey();
+            if (deviceEntriesRaw.size() < 64) {
+                String name = cabinet == null ? entry.key() : cabinet.alias(entry.key());
+                if (name == null || name.isBlank()) {
+                    name = entry.key();
+                }
+                String status = isRunning ? "run" : (containerTotal > 0 ? "full" : "idle");
+                String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                        .getKey(serverLevel.getBlockState(entry.pos()).getBlock()).toString();
+                deviceEntriesRaw.add(entry.key() + "|" + name + "|" + containerTotal
+                        + "|" + status + "|" + blockId);
             }
-            String status = isRunning ? "run" : (containerTotal > 0 ? "full" : "idle");
-            String blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                    .getKey(serverLevel.getBlockState(entry.getValue()).getBlock()).toString();
-            deviceTotals.add(java.util.Map.entry(name, containerTotal));
-            deviceEntriesRaw.add(entry.getKey() + "|" + name + "|" + containerTotal
-                    + "|" + status + "|" + blockId);
         }
 
         int kinds = itemCounts.size();
@@ -335,21 +353,21 @@ public class DisplayPanelBlockEntity extends BlockEntity {
 
         long energy = 0;
         for (BlockPos pos : cluster.cabinets()) {
-            if (serverLevel.getBlockEntity(pos) instanceof CabinetBlockEntity cab) {
+            if (serverLevel.hasChunkAt(pos) && serverLevel.getBlockEntity(pos) instanceof CabinetBlockEntity cab) {
                 energy += cab.energy().getAmountAsLong();
             }
         }
 
-        lines.add("物品 " + compact(totalItems) + " / " + kinds + "种");
-        lines.add("容器 " + containers + " 运行" + running);
-        lines.add("机柜 " + cluster.cabinetCount() + " 终端 " + cluster.terminalCount());
-        lines.add("线程 " + cluster.usedThreads() + "/" + cluster.threadCapacity());
-        lines.add("电力 " + compact(energy) + " FE");
+        lines.add("@items|" + compact(totalItems) + "|" + kinds);
+        lines.add("@containers|" + containers + "|" + running);
+        lines.add("@cabinets|" + cluster.cabinetCount() + "|" + cluster.terminalCount());
+        lines.add("@threads|" + cluster.usedThreads() + "|" + cluster.threadCapacity());
+        lines.add("@energy|" + compact(energy));
     }
 
     /** A big wall may be linked at a far corner, so every panel is checked. */
     private Cluster findClusterInWall(ServerLevel level) {
-        if (linkAnchor != null) {
+        if (linkAnchor != null && level.hasChunkAt(linkAnchor)) {
             Cluster cached = ClusterManager.clusterFor(level, linkAnchor);
             if (cached != null) {
                 return cached;
@@ -365,6 +383,9 @@ public class DisplayPanelBlockEntity extends BlockEntity {
                         : new BlockPos(controllerPos.getX(), controllerPos.getY() + v, controllerPos.getZ() + u);
                 for (Direction direction : Direction.values()) {
                     BlockPos anchor = panel.relative(direction);
+                    if (!level.hasChunkAt(anchor)) {
+                        continue;
+                    }
                     Cluster cluster = ClusterManager.clusterFor(level, anchor);
                     if (cluster != null) {
                         linkAnchor = anchor.immutable();

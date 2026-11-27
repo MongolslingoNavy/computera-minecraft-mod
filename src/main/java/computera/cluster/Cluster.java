@@ -56,7 +56,8 @@ public final class Cluster {
     public int usedThreads() {
         int used = terminals.size();
         for (BlockPos pos : terminals) {
-            if (level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal
+            if (level.hasChunkAt(pos)
+                    && level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal
                     && terminal.isRunning()) {
                 used++;
             }
@@ -100,7 +101,8 @@ public final class Cluster {
     public int threadCapacity() {
         int total = 0;
         for (BlockPos pos : cabinets) {
-            if (level.getBlockEntity(pos) instanceof CabinetBlockEntity cabinet) {
+            if (level.hasChunkAt(pos) && level.getBlockEntity(pos) instanceof CabinetBlockEntity cabinet
+                    && !cabinet.isRemoved()) {
                 total += cabinet.installedThreads();
             }
         }
@@ -108,17 +110,26 @@ public final class Cluster {
     }
 
     public CabinetBlockEntity primaryCabinet() {
+        CabinetBlockEntity best = null;
+        long bestKey = Long.MAX_VALUE;
         for (BlockPos pos : cabinets) {
-            if (level.getBlockEntity(pos) instanceof CabinetBlockEntity cabinet) {
-                return cabinet;
+            if (!level.hasChunkAt(pos)) {
+                continue;
+            }
+            long key = pos.asLong();
+            if (key < bestKey
+                    && level.getBlockEntity(pos) instanceof CabinetBlockEntity cabinet
+                    && !cabinet.isRemoved()) {
+                bestKey = key;
+                best = cabinet;
             }
         }
-        return null;
+        return best;
     }
 
     public boolean isLoaded() {
         for (BlockPos pos : cabinets) {
-            if (!level.isLoaded(pos)) {
+            if (!level.hasChunkAt(pos)) {
                 return false;
             }
         }
@@ -126,19 +137,23 @@ public final class Cluster {
     }
 
     public void tick() {
-        if (!pipes.isEmpty() && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-            computera.logistics.LogisticsMover.move(serverLevel, this);
+        if (!pipes.isEmpty()) {
+            computera.logistics.LogisticsMover.move(level, this);
         }
         int running = 0;
         for (BlockPos pos : terminals) {
-            if (level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal
+            if (level.hasChunkAt(pos)
+                    && level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal
+                    && !terminal.isRemoved()
                     && terminal.isRunning()) {
                 running++;
             }
         }
         int budget = running == 0 ? 0 : computera.blockentity.TerminalBlockEntity.TICK_BUDGET / running;
         for (BlockPos pos : terminals) {
-            if (level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal) {
+            if (level.hasChunkAt(pos)
+                    && level.getBlockEntity(pos) instanceof computera.blockentity.TerminalBlockEntity terminal
+                    && !terminal.isRemoved()) {
                 terminal.serverTick();
                 terminal.tickScript(budget);
             }

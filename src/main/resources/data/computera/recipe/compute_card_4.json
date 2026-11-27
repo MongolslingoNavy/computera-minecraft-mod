@@ -6,8 +6,8 @@
     "NQN"
   ],
   "key": {
-    "N": "minecraft:netherite_ingot",
-    "Q": "minecraft:redstone_block",
+    "N": "#c:ingots/netherite",
+    "Q": "#c:storage_blocks/redstone",
     "C": "computera:compute_card_3"
   },
   "result": {

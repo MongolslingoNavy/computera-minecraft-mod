@@ -14,6 +14,7 @@ import java.util.List;
 public class DisplayScreen extends Screen {
     private static final int WIDTH = 340;
     private static final int HEIGHT = 214;
+    private static final int MAX_VISIBLE_ROWS = 12;
 
     private final BlockPos pos;
     private final int wallW;
@@ -25,6 +26,7 @@ public class DisplayScreen extends Screen {
 
     private int left;
     private int top;
+    private int scroll;
 
     public DisplayScreen(BlockPos pos, int wallW, int wallH, String modeText,
                          List<String> lines, List<String> items, List<String> devices) {
@@ -78,15 +80,25 @@ public class DisplayScreen extends Screen {
 
         graphics.fill(left + 8, top + 28, left + WIDTH - 8, top + HEIGHT - 34, 0xFF0C140F);
         List<String> content = DisplayText.content(mode, lines, itemEntries, deviceEntries, false);
+        int maxScroll = Math.max(0, content.size() - MAX_VISIBLE_ROWS);
+        scroll = Math.max(0, Math.min(scroll, maxScroll));
         int y = top + 34;
-        for (int i = 0; i < content.size(); i++) {
+        int end = Math.min(content.size(), scroll + MAX_VISIBLE_ROWS);
+        for (int i = scroll; i < end; i++) {
             int color = i == 0 ? 0xFF7FF0C8 : 0xFFB8E8C8;
-            graphics.text(this.font, Component.literal(content.get(i)), left + 14, y, color, false);
+            String line = content.get(i);
+            if (this.font.width(line) > WIDTH - 28) {
+                line = this.font.plainSubstrByWidth(line, WIDTH - 34) + "…";
+            }
+            graphics.text(this.font, Component.literal(line), left + 14, y, color, false);
             y += 12;
         }
         if (content.isEmpty()) {
             graphics.text(this.font, Component.translatable("computera.gui.display.empty"),
                     left + 14, y, 0xFF4F6A58, false);
+        } else if (maxScroll > 0) {
+            graphics.text(this.font, Component.literal((scroll + 1) + "/" + (maxScroll + 1)),
+                    left + WIDTH - 42, top + HEIGHT - 45, 0xFF5F8A6A, false);
         }
 
         graphics.text(this.font, Component.translatable("computera.gui.display.hint"),
@@ -98,6 +110,17 @@ public class DisplayScreen extends Screen {
                 Component.translatable("computera.gui.display.close"), mouseX, mouseY);
 
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        List<String> content = DisplayText.content(mode, lines, itemEntries, deviceEntries, false);
+        int maxScroll = Math.max(0, content.size() - MAX_VISIBLE_ROWS);
+        if (maxScroll > 0) {
+            scroll = Math.max(0, Math.min(maxScroll, scroll + (scrollY < 0 ? 1 : -1)));
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     private String modeLabel() {

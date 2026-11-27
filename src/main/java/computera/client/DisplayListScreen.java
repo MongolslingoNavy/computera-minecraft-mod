@@ -176,6 +176,12 @@ public class DisplayListScreen extends Screen {
     }
 
     @Override
+    public void onClose() {
+        send("close", "", "");
+        super.onClose();
+    }
+
+    @Override
     public boolean isPauseScreen() {
         return false;
     }

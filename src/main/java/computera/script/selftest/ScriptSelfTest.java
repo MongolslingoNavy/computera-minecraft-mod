@@ -43,6 +43,8 @@ public final class ScriptSelfTest {
         testTimeBuiltin();
         testHalt();
         testCompileErrors();
+        testSafetyAndDosProtections();
+        testItemFilterAndTagScripts();
 
         System.out.println();
         int total = passed + failed;
@@ -583,6 +585,154 @@ public final class ScriptSelfTest {
                 comparisonChain != null && comparisonChain.line == 1
                         && comparisonChain.getMessage().contains("comparison chaining"),
                 "line 1 comparison chaining error", describe(comparisonChain));
+    }
+
+    private static void testSafetyAndDosProtections() {
+        // 1. Parser recursion depth limit (6000 nested parens must fail cleanly, never StackOverflowError)
+        String deepParens = "(".repeat(6000) + "1" + ")".repeat(6000) + "\n";
+        ScriptCompileException depthError = compileError(deepParens);
+        check("deeply nested parens rejected without StackOverflowError",
+                depthError != null && depthError.getMessage().contains("nesting depth"),
+                "nesting depth compile error", describe(depthError));
+
+        // 2. String doubling memory bomb (28 doublings must hit MemoryError, never OOM)
+        Run stringBomb = run("""
+                s = "AAAAAAAAAAAAAAAA"
+                for i in range(28):
+                    s = s + s
+                print(len(s))
+                """);
+        String strErr = stringBomb.host != null && !stringBomb.host.errors.isEmpty()
+                ? stringBomb.host.errors.get(0) : "";
+        check("string doubling blocked by length limit",
+                stringBomb.compileError == null && strErr.contains("MemoryError")
+                        && stringBomb.vm.isFinished(),
+                "MemoryError and finished", errorsOf(stringBomb));
+
+        // 3. Doubly self-referential cyclic list print() must finish immediately with [...]
+        long cycleStart = System.nanoTime();
+        Run cyclePrint = run("""
+                a = [0, 0]
+                a[0] = a
+                a[1] = a
+                print(a)
+                """);
+        long cycleMs = (System.nanoTime() - cycleStart) / 1_000_000L;
+        check("cyclic list print finishes quickly with cycle marker",
+                cyclePrint.compileError == null && cyclePrint.host.errors.isEmpty()
+                        && cyclePrint.vm.isFinished() && cycleMs < 1000L
+                        && cyclePrint.host.prints.equals(List.of("[[...], [...]]")),
+                "prints=[[[...], [...]]] in <1000ms",
+                "ms=" + cycleMs + ", prints=" + (cyclePrint.host == null ? "null" : cyclePrint.host.prints)
+                        + ", errors=" + errorsOf(cyclePrint));
+
+        // 4. Depth-28 shared DAG equality (a == b) must finish quickly without exponential hang
+        long dagStart = System.nanoTime();
+        Run dagEq = run("""
+                a = [1, 1]
+                b = [1, 1]
+                for i in range(28):
+                    a = [a, a]
+                    b = [b, b]
+                print(a == b)
+                """);
+        long dagMs = (System.nanoTime() - dagStart) / 1_000_000L;
+        check("depth-28 DAG equality finishes quickly without hang",
+                dagEq.compileError == null && dagEq.host.errors.isEmpty()
+                        && dagEq.vm.isFinished() && dagMs < 1000L
+                        && dagEq.host.prints.equals(List.of("True")),
+                "prints=[True] in <1000ms",
+                "ms=" + dagMs + ", prints=" + (dagEq.host == null ? "null" : dagEq.host.prints)
+                        + ", errors=" + errorsOf(dagEq));
+
+        // 5. range(1000000) rejected cleanly by RANGE_LIMIT (10,000) and range cost billed to budget
+        Run rangeTooBig = run("""
+                x = range(1000000)
+                print(len(x))
+                """);
+        String rangeErr = rangeTooBig.host != null && !rangeTooBig.host.errors.isEmpty()
+                ? rangeTooBig.host.errors.get(0) : "";
+        check("range(1000000) rejected by safe range limit",
+                rangeTooBig.compileError == null && rangeErr.contains("ValueError")
+                        && rangeErr.contains("10000"),
+                "ValueError with limit 10000", errorsOf(rangeTooBig));
+
+        try {
+            ScriptProgram rangeCostProg = ScriptCompiler.compile("""
+                    a = range(5000)
+                    print("done")
+                    """, "range_cost.py");
+            Host costHost = new Host();
+            ScriptVM costVm = new ScriptVM(rangeCostProg, costHost);
+            boolean stillAlive = costVm.step(1000);
+            check("range() cost is billed against instruction budget",
+                    stillAlive && costHost.prints.isEmpty(),
+                    "yielded before print", "stillAlive=" + stillAlive + ", prints=" + costHost.prints);
+            while (!costVm.isFinished()) {
+                costVm.step(1000);
+            }
+            checkEquals("range() billed script resumes to completion", List.of("done"), costHost.prints);
+        } catch (ScriptCompileException e) {
+            fail("range() cost is billed against instruction budget", "compiled program", e.getMessage());
+        }
+    }
+
+    private static void testItemFilterAndTagScripts() {
+        check("ItemFilter detects #tag specs",
+                computera.util.ItemFilter.isTagSpec("#c:wires/copper")
+                        && computera.util.ItemFilter.isTagSpec(" #c:ingots/iron ")
+                        && !computera.util.ItemFilter.isTagSpec("minecraft:iron_ingot")
+                        && !computera.util.ItemFilter.isTagSpec(null),
+                "tag specs recognized", "mismatch");
+
+        checkEquals("ItemFilter normalizes exact ID", "minecraft:iron_ingot",
+                computera.util.ItemFilter.normalize(" minecraft:iron_ingot "));
+        checkEquals("ItemFilter normalizes #tag spec", "#c:ingots/tin",
+                computera.util.ItemFilter.normalize(" #c:ingots/tin "));
+        check("ItemFilter rejects malformed specs",
+                !computera.util.ItemFilter.isValid("")
+                        && !computera.util.ItemFilter.isValid("#")
+                        && !computera.util.ItemFilter.isValid("#UPPER:Invalid")
+                        && !computera.util.ItemFilter.isValid("bad id with spaces")
+                        && computera.util.ItemFilter.parseTag("#c:wires/copper") != null
+                        && computera.util.ItemFilter.parseLooseTag("c:wires/copper") != null
+                        && computera.util.ItemFilter.parseLooseTag("#c:wires/copper") != null,
+                "invalid rejected & valid parsed", "mismatch");
+
+        Device tagBox = new Device() {
+            @Override
+            public Value call(String method, List<Value> args) {
+                return switch (method) {
+                    case "has_tag" -> {
+                        String raw = args.get(1).asString().trim();
+                        if (raw.startsWith("#")) {
+                            raw = raw.substring(1);
+                        }
+                        yield Value.of(args.get(0).asLong() == 0L
+                                && ("c:wires/copper".equals(raw) || "c:wires".equals(raw)));
+                    }
+                    case "tags" -> args.get(0).asLong() == 0L
+                            ? Value.list(List.of(Value.of("c:wires"), Value.of("c:wires/copper")))
+                            : Value.list(List.of());
+                    default -> throw new ScriptRuntimeException("unknown method: " + method);
+                };
+            }
+
+            @Override
+            public Value get(String property) {
+                throw new ScriptRuntimeException("no property");
+            }
+        };
+        Run tagRun = runWithDevices("""
+                print(devices.box.has_tag(0, "c:wires/copper"))
+                print(devices.box.has_tag(0, "#c:wires"))
+                print(devices.box.has_tag(0, "c:ingots/iron"))
+                print(len(devices.box.tags(0)))
+                print("c:wires/copper" in devices.box.tags(0))
+                print(len(devices.box.tags(1)))
+                """, Map.of("box", tagBox));
+        checkRun("script has_tag and tags container API", tagRun,
+                "True", "True", "False", "2", "True", "0");
     }
 
     private static Run run(String source) {
