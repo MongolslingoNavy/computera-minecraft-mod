@@ -2,10 +2,13 @@ package computera.logistics;
 
 import computera.blockentity.LogisticsPortBlockEntity;
 import computera.cluster.Cluster;
+import computera.util.ItemFilter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.transfer.ResourceHandler;
 import net.neoforged.neoforge.transfer.item.ItemResource;
@@ -14,13 +17,18 @@ import net.neoforged.neoforge.transfer.transaction.Transaction;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class LogisticsMover {
     public static final int ITEMS_PER_PIPE_PER_TICK = 4;
 
     private record Endpoint(BlockPos pos, ResourceHandler<ItemResource> handler) {
+    }
+
+    private record TagDestination(TagKey<Item> tag, Endpoint endpoint) {
     }
 
     public static int move(ServerLevel level, Cluster cluster) {
@@ -29,7 +37,8 @@ public final class LogisticsMover {
             return 0;
         }
 
-        Map<String, List<Endpoint>> destinations = new LinkedHashMap<>();
+        Map<String, List<Endpoint>> exactDestinations = new LinkedHashMap<>();
+        List<TagDestination> tagDestinations = new ArrayList<>();
         List<Endpoint> sources = new ArrayList<>();
         Map<BlockPos, Boolean> seen = new HashMap<>();
 
@@ -57,8 +66,17 @@ public final class LogisticsMover {
                     continue;
                 }
                 Endpoint endpoint = new Endpoint(canonicalPos, handler);
-                if (filter != null) {
-                    destinations.computeIfAbsent(filter, ignored -> new ArrayList<>()).add(endpoint);
+                if (filter != null && !filter.isBlank()) {
+                    if (ItemFilter.isTagSpec(filter)) {
+                        TagKey<Item> tag = ItemFilter.parseTag(filter);
+                        if (tag != null) {
+                            tagDestinations.add(new TagDestination(tag, endpoint));
+                        }
+                    } else {
+                        String normalized = ItemFilter.normalize(filter);
+                        exactDestinations.computeIfAbsent(normalized != null ? normalized : filter,
+                                ignored -> new ArrayList<>()).add(endpoint);
+                    }
                 } else {
                     sources.add(endpoint);
                 }
@@ -73,9 +91,10 @@ public final class LogisticsMover {
                 if (resource.isEmpty()) {
                     continue;
                 }
-                String id = BuiltInRegistries.ITEM.getKey(resource.toStack(1).getItem()).toString();
-                List<Endpoint> targets = destinations.get(id);
-                if (targets == null || targets.isEmpty()) {
+                String id = BuiltInRegistries.ITEM.getKey(resource.getItem()).toString();
+                List<Endpoint> exact = exactDestinations.get(id);
+                List<Endpoint> targets = collectTargets(exact, tagDestinations, resource);
+                if (targets.isEmpty()) {
                     continue;
                 }
                 for (Endpoint target : targets) {
@@ -109,6 +128,23 @@ public final class LogisticsMover {
             }
         }
         return moved;
+    }
+
+    private static List<Endpoint> collectTargets(List<Endpoint> exact, List<TagDestination> tagDestinations,
+                                                 ItemResource resource) {
+        if (tagDestinations.isEmpty()) {
+            return exact == null ? List.of() : exact;
+        }
+        Set<Endpoint> combined = new LinkedHashSet<>();
+        if (exact != null) {
+            combined.addAll(exact);
+        }
+        for (TagDestination dest : tagDestinations) {
+            if (resource.typeHolder().is(dest.tag())) {
+                combined.add(dest.endpoint());
+            }
+        }
+        return combined.isEmpty() ? List.of() : List.copyOf(combined);
     }
 
     private LogisticsMover() {

@@ -49,7 +49,7 @@ public final class LogisticsIndex {
         return index;
     }
 
-    public static long countAtPort(ServerLevel level, BlockPos portPos, String itemId) {
+    public static long countAtPort(ServerLevel level, BlockPos portPos, String itemSpec) {
         long total = 0;
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = portPos.relative(direction);
@@ -63,7 +63,7 @@ public final class LogisticsIndex {
             }
             for (int slot = 0; slot < handler.size(); slot++) {
                 ItemResource resource = handler.getResource(slot);
-                if (!resource.isEmpty() && itemId.equals(itemId(resource))) {
+                if (!resource.isEmpty() && computera.util.ItemFilter.matches(itemSpec, resource)) {
                     total += handler.getAmountAsLong(slot);
                 }
             }
@@ -71,22 +71,49 @@ public final class LogisticsIndex {
         return total;
     }
 
-    public static long count(ServerLevel level, Cluster cluster, String itemId) {
+    /**
+     * Finds all matching item slots across the cluster for either an exact item ID
+     * (e.g. {@code minecraft:iron_ingot}) or an item tag ({@code #c:ingots/iron}).
+     */
+    public static List<Entry> find(ServerLevel level, Cluster cluster, String itemSpec) {
+        if (itemSpec == null || itemSpec.isBlank()) {
+            return List.of();
+        }
+        Map<String, List<Entry>> index = build(level, cluster);
+        if (!computera.util.ItemFilter.isTagSpec(itemSpec)) {
+            String normalized = computera.util.ItemFilter.normalize(itemSpec);
+            return index.getOrDefault(normalized != null ? normalized : itemSpec.trim(), List.of());
+        }
+        if (computera.util.ItemFilter.parseTag(itemSpec) == null) {
+            return List.of();
+        }
+        List<Entry> matched = new ArrayList<>();
+        for (Map.Entry<String, List<Entry>> entry : index.entrySet()) {
+            if (computera.util.ItemFilter.matchesItemId(itemSpec, entry.getKey())) {
+                matched.addAll(entry.getValue());
+            }
+        }
+        return matched;
+    }
+
+    public static long count(ServerLevel level, Cluster cluster, String itemSpec) {
         long total = 0;
-        for (Entry entry : build(level, cluster).getOrDefault(itemId, List.of())) {
+        for (Entry entry : find(level, cluster, itemSpec)) {
             total += entry.count();
         }
         return total;
     }
 
-    public static int store(ServerLevel level, Cluster cluster, ServerPlayer player, String itemId, int amount) {
-        Identifier parsed = Identifier.tryParse(itemId);
-        if (parsed == null || amount <= 0) {
+    public static int store(ServerLevel level, Cluster cluster, ServerPlayer player, String itemSpec, int amount) {
+        if (!computera.util.ItemFilter.isValid(itemSpec) || amount <= 0) {
             return -1;
         }
-        Item item = BuiltInRegistries.ITEM.getValue(parsed);
-        if (item == null || item == Items.AIR) {
-            return -1;
+        if (!computera.util.ItemFilter.isTagSpec(itemSpec)) {
+            Identifier parsed = Identifier.tryParse(itemSpec.trim());
+            Item item = parsed == null ? null : BuiltInRegistries.ITEM.getValue(parsed);
+            if (item == null || item == Items.AIR) {
+                return -1;
+            }
         }
         int remaining = amount;
         var inventory = player.getInventory();
@@ -96,7 +123,7 @@ public final class LogisticsIndex {
             }
             if (!level.hasChunkAt(portPos)
                     || !(level.getBlockEntity(portPos) instanceof LogisticsPortBlockEntity port)
-                    || !itemId.equals(port.filter())) {
+                    || port.filter() == null) {
                 continue;
             }
             for (Direction direction : Direction.values()) {
@@ -114,7 +141,9 @@ public final class LogisticsIndex {
                 }
                 for (int slot = 0; slot < 36 && remaining > 0; slot++) {
                     ItemStack stack = inventory.getItem(slot);
-                    if (stack.isEmpty() || !stack.is(item)) {
+                    if (stack.isEmpty()
+                            || !computera.util.ItemFilter.matches(itemSpec, stack)
+                            || !port.matches(stack)) {
                         continue;
                     }
                     int want = Math.min(stack.getCount(), remaining);
@@ -134,12 +163,12 @@ public final class LogisticsIndex {
         return amount - remaining;
     }
 
-    public static int withdraw(ServerLevel level, Cluster cluster, ServerPlayer player, String itemId, int amount) {
+    public static int withdraw(ServerLevel level, Cluster cluster, ServerPlayer player, String itemSpec, int amount) {
         if (amount <= 0) {
             return 0;
         }
         int remaining = amount;
-        for (Entry entry : build(level, cluster).getOrDefault(itemId, List.of())) {
+        for (Entry entry : find(level, cluster, itemSpec)) {
             if (remaining <= 0) {
                 break;
             }

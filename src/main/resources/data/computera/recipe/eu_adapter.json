@@ -7,7 +7,7 @@
   ],
   "key": {
     "I": "#c:ingots/iron",
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "R": "#c:storage_blocks/redstone",
     "D": "#c:gems/diamond"
   },

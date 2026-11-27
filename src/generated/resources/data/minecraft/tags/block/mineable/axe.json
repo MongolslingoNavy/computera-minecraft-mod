@@ -1,5 +1,4 @@
 {
-  "replace": false,
   "values": [
     "computera:crate",
     "computera:terminal_teletype"

@@ -9,7 +9,7 @@
     "I": "#c:ingots/iron",
     "L": "minecraft:lever",
     "P": "minecraft:paper",
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "R": "#c:dusts/redstone"
   },
   "result": {

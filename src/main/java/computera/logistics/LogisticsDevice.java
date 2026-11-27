@@ -65,9 +65,9 @@ public final class LogisticsDevice implements Device {
         throw new ScriptRuntimeException("logistics has no property " + property);
     }
 
-    private Value find(Cluster cluster, String itemId) {
+    private Value find(Cluster cluster, String itemSpec) {
         List<Value> lines = new ArrayList<>();
-        for (LogisticsIndex.Entry entry : LogisticsIndex.build(level, cluster).getOrDefault(itemId, List.of())) {
+        for (LogisticsIndex.Entry entry : LogisticsIndex.find(level, cluster, itemSpec)) {
             lines.add(Value.of(entry.container() + " slot " + entry.slot() + " x " + entry.count()));
         }
         return Value.list(lines);

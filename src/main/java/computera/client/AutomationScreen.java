@@ -404,14 +404,7 @@ public class AutomationScreen extends Screen {
     }
 
     private static Item itemOf(String id) {
-        if (id == null || id.isBlank()) {
-            return null;
-        }
-        try {
-            return BuiltInRegistries.ITEM.getValue(Identifier.parse(id.trim()));
-        } catch (RuntimeException e) {
-            return null;
-        }
+        return computera.util.ItemFilter.previewItem(id);
     }
 
     private void drawButton(GuiGraphicsExtractor graphics, int x, int y, int w, int h,

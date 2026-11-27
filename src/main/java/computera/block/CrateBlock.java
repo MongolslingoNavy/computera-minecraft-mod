@@ -39,6 +39,16 @@ public class CrateBlock extends BaseEntityBlock {
     }
 
     @Override
+    protected InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state, Level level,
+                                          BlockPos pos, Player player, net.minecraft.world.InteractionHand hand,
+                                          BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
+        return InteractionResult.TRY_WITH_EMPTY_HAND;
+    }
+
+    @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player,
                                                BlockHitResult hitResult) {
         if (!level.isClientSide() && player instanceof ServerPlayer serverPlayer

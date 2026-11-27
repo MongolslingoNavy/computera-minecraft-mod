@@ -1,0 +1,9 @@
+{
+  "values": [
+    "#c:leathers",
+    {
+      "id": "#c:rubbers",
+      "required": false
+    }
+  ]
+}

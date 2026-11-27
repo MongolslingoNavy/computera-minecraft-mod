@@ -6,7 +6,7 @@
     " E "
   ],
   "key": {
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "R": "#c:dusts/redstone",
     "E": "#c:ender_pearls"
   },

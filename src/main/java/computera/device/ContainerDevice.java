@@ -99,6 +99,21 @@ public final class ContainerDevice implements Device {
                 checkSlot(handler, slot);
                 yield Value.of(handler.getAmountAsLong(slot));
             }
+            case "has_tag" -> {
+                int slot = intArg(args, 0);
+                String tag = stringArg(args, 1);
+                checkSlot(handler, slot);
+                yield Value.of(computera.util.ItemFilter.hasTag(handler.getResource(slot), tag));
+            }
+            case "tags" -> {
+                int slot = intArg(args, 0);
+                checkSlot(handler, slot);
+                List<Value> list = computera.util.ItemFilter.tagsOf(handler.getResource(slot))
+                        .stream()
+                        .map(Value::of)
+                        .toList();
+                yield Value.list(list);
+            }
             default -> throw new ScriptRuntimeException("container has no method " + method);
         };
     }

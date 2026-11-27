@@ -2,8 +2,8 @@
   "type": "minecraft:crafting_shapeless",
   "ingredients": [
     "#c:ingots/iron",
-    "computera:copper_wire",
-    "computera:copper_wire"
+    "#c:wires/copper",
+    "#c:wires/copper"
   ],
   "result": {
     "id": "computera:logistics_pipe",

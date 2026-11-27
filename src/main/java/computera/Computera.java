@@ -36,11 +36,14 @@ public class Computera {
 
         modEventBus.addListener(Computera::registerCapabilities);
         modEventBus.addListener(ComputeraNetwork::register);
+        modEventBus.addListener(computera.datagen.ComputeraDataGen::gatherClient);
+        modEventBus.addListener(computera.datagen.ComputeraDataGen::gatherServer);
         computera.compat.ComputeraTopCompat.install(modEventBus);
         NeoForge.EVENT_BUS.addListener(ClusterManager::onServerTick);
         NeoForge.EVENT_BUS.addListener(ComputeraCommands::register);
         NeoForge.EVENT_BUS.addListener(computera.compat.ConnectionRefresher::onChunkLoad);
         NeoForge.EVENT_BUS.addListener(computera.compat.ConnectionRefresher::onServerTick);
+        NeoForge.EVENT_BUS.addListener(computera.util.WrenchSupport::onRightClickBlock);
         NeoForge.EVENT_BUS.addListener(Computera::onLevelUnload);
         NeoForge.EVENT_BUS.addListener(Computera::onServerStopping);
     }

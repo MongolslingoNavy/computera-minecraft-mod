@@ -317,6 +317,15 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         }
     }
 
+    public boolean hasPreservableState() {
+        return energy.getAmountAsLong() > 0L
+                || !files.isEmpty()
+                || !aliases.isEmpty()
+                || !groups.isEmpty()
+                || !rules.isEmpty()
+                || !wirelessFaces.isEmpty();
+    }
+
     public Map<String, String> files() {
         return files;
     }
@@ -409,8 +418,7 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
 
     private void moveItems(ServerLevel level, Map<String, DeviceRegistry.DeviceEntry> entries,
                            String from, String to, String item, int count) {
-        Identifier id = Identifier.tryParse(item);
-        if (id == null || count <= 0) {
+        if (!computera.util.ItemFilter.isValid(item) || count <= 0) {
             return;
         }
         var fromEntry = entries.get(from);
@@ -428,15 +436,10 @@ public class CabinetBlockEntity extends BlockEntity implements MenuProvider {
         if (source == null || target == null) {
             return;
         }
-        String targetId = id.toString();
         int remaining = Math.min(count, 64);
         for (int slot = 0; slot < source.size() && remaining > 0; slot++) {
             ItemResource resource = source.getResource(slot);
-            if (resource.isEmpty()) {
-                continue;
-            }
-            String slotId = BuiltInRegistries.ITEM.getKey(resource.toStack(1).getItem()).toString();
-            if (!targetId.equals(slotId)) {
+            if (resource.isEmpty() || !computera.util.ItemFilter.matches(item, resource)) {
                 continue;
             }
             int want = (int) Math.min(source.getAmountAsLong(slot), remaining);

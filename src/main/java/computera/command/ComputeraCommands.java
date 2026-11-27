@@ -253,6 +253,8 @@ public final class ComputeraCommands {
             ok &= check(results, "logistics port discovered", cluster != null && !cluster.ports().isEmpty());
             ok &= check(results, "logistics index counts diamonds", cluster != null
                     && computera.logistics.LogisticsIndex.count(level, cluster, "minecraft:diamond") == 5);
+            ok &= check(results, "logistics index counts #c:gems/diamond tag", cluster != null
+                    && computera.logistics.LogisticsIndex.count(level, cluster, "#c:gems/diamond") == 5);
 
             TerminalBlockEntity terminal = level.getBlockEntity(terminalPos) instanceof TerminalBlockEntity t
                     ? t
@@ -314,6 +316,13 @@ public final class ComputeraCommands {
                 } catch (computera.script.ScriptRuntimeException expected) {
                     rejected = true;
                 }
+                ok &= check(results, "container has_tag matches diamond tag",
+                        box.call("has_tag", List.of(Value.of(0L), Value.of("c:gems/diamond"))).asBool()
+                                && box.call("has_tag", List.of(Value.of(0L), Value.of("#c:gems/diamond"))).asBool()
+                                && !box.call("has_tag", List.of(Value.of(0L), Value.of("c:ingots/iron"))).asBool());
+                Value tagList = box.call("tags", List.of(Value.of(0L)));
+                ok &= check(results, "container tags lists c:gems/diamond",
+                        tagList.isList() && tagList.asList().stream().anyMatch(v -> "c:gems/diamond".equals(v.asString())));
                 ok &= check(results, "script cannot create items", rejected && chest.getAmountAsLong(0) == 5);
                 box.call("move", List.of(Value.of(0L), Value.of(1L), Value.of(2L)));
                 ok &= check(results, "script move conserves items",
@@ -444,7 +453,7 @@ public final class ComputeraCommands {
             level.setBlock(destPort, ModBlocks.LOGISTICS_PORT.get().defaultBlockState(), 3);
             level.setBlock(destChest, Blocks.CHEST.defaultBlockState(), 3);
             if (level.getBlockEntity(destPort) instanceof computera.blockentity.LogisticsPortBlockEntity port) {
-                port.setFilter("minecraft:diamond");
+                port.setFilter("#c:gems/diamond");
             }
             ClusterManager.invalidate(level, cabinetPos);
             Cluster pipeCluster = ClusterManager.clusterFor(level, cabinetPos);
@@ -454,7 +463,7 @@ public final class ComputeraCommands {
             ResourceHandler<ItemResource> destHandler =
                     level.getCapability(Capabilities.Item.BLOCK, destChest, null);
             long destCount = destHandler == null ? -1 : destHandler.getAmountAsLong(0);
-            ok &= check(results, "pipe moved 4 diamonds", pipeMoved == 4 && destCount == 4);
+            ok &= check(results, "pipe moved 4 diamonds via #tag filter", pipeMoved == 4 && destCount == 4);
 
             level.setBlock(euPos, ModBlocks.EU_ADAPTER.get().defaultBlockState(), 3);
             if (level.getBlockEntity(euPos) instanceof computera.blockentity.EuAdapterBlockEntity adapter) {

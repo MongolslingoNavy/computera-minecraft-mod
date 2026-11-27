@@ -94,6 +94,18 @@ public abstract class CordBlock extends Block {
         refresh(level, pos, state);
     }
 
+    @Override
+    protected net.minecraft.world.InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state,
+                                                              Level level, BlockPos pos,
+                                                              net.minecraft.world.entity.player.Player player,
+                                                              net.minecraft.world.InteractionHand hand,
+                                                              net.minecraft.world.phys.BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
+        return super.useItemOn(stack, state, level, pos, player, hand, hitResult);
+    }
+
     /**
      * Writes the recomputed arms back without triggering another neighbour pass;
      * every cord receives its own refresh, so cascading updates are not needed.

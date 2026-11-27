@@ -44,6 +44,7 @@ public final class ScriptSelfTest {
         testHalt();
         testCompileErrors();
         testSafetyAndDosProtections();
+        testItemFilterAndTagScripts();
 
         System.out.println();
         int total = passed + failed;
@@ -674,6 +675,64 @@ public final class ScriptSelfTest {
         } catch (ScriptCompileException e) {
             fail("range() cost is billed against instruction budget", "compiled program", e.getMessage());
         }
+    }
+
+    private static void testItemFilterAndTagScripts() {
+        check("ItemFilter detects #tag specs",
+                computera.util.ItemFilter.isTagSpec("#c:wires/copper")
+                        && computera.util.ItemFilter.isTagSpec(" #c:ingots/iron ")
+                        && !computera.util.ItemFilter.isTagSpec("minecraft:iron_ingot")
+                        && !computera.util.ItemFilter.isTagSpec(null),
+                "tag specs recognized", "mismatch");
+
+        checkEquals("ItemFilter normalizes exact ID", "minecraft:iron_ingot",
+                computera.util.ItemFilter.normalize(" minecraft:iron_ingot "));
+        checkEquals("ItemFilter normalizes #tag spec", "#c:ingots/tin",
+                computera.util.ItemFilter.normalize(" #c:ingots/tin "));
+        check("ItemFilter rejects malformed specs",
+                !computera.util.ItemFilter.isValid("")
+                        && !computera.util.ItemFilter.isValid("#")
+                        && !computera.util.ItemFilter.isValid("#UPPER:Invalid")
+                        && !computera.util.ItemFilter.isValid("bad id with spaces")
+                        && computera.util.ItemFilter.parseTag("#c:wires/copper") != null
+                        && computera.util.ItemFilter.parseLooseTag("c:wires/copper") != null
+                        && computera.util.ItemFilter.parseLooseTag("#c:wires/copper") != null,
+                "invalid rejected & valid parsed", "mismatch");
+
+        Device tagBox = new Device() {
+            @Override
+            public Value call(String method, List<Value> args) {
+                return switch (method) {
+                    case "has_tag" -> {
+                        String raw = args.get(1).asString().trim();
+                        if (raw.startsWith("#")) {
+                            raw = raw.substring(1);
+                        }
+                        yield Value.of(args.get(0).asLong() == 0L
+                                && ("c:wires/copper".equals(raw) || "c:wires".equals(raw)));
+                    }
+                    case "tags" -> args.get(0).asLong() == 0L
+                            ? Value.list(List.of(Value.of("c:wires"), Value.of("c:wires/copper")))
+                            : Value.list(List.of());
+                    default -> throw new ScriptRuntimeException("unknown method: " + method);
+                };
+            }
+
+            @Override
+            public Value get(String property) {
+                throw new ScriptRuntimeException("no property");
+            }
+        };
+        Run tagRun = runWithDevices("""
+                print(devices.box.has_tag(0, "c:wires/copper"))
+                print(devices.box.has_tag(0, "#c:wires"))
+                print(devices.box.has_tag(0, "c:ingots/iron"))
+                print(len(devices.box.tags(0)))
+                print("c:wires/copper" in devices.box.tags(0))
+                print(len(devices.box.tags(1)))
+                """, Map.of("box", tagBox));
+        checkRun("script has_tag and tags container API", tagRun,
+                "True", "True", "False", "2", "True", "0");
     }
 
     private static Run run(String source) {

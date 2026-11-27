@@ -52,6 +52,9 @@ public abstract class TerminalBlock extends Block implements EntityBlock {
     @Override
     protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player,
                                           InteractionHand hand, BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
         if (!level.isClientSide() && kind().usesPaperTape()
                 && stack.is(computera.registry.ModItems.PAPER_TAPE.get())
                 && level.getBlockEntity(pos) instanceof TerminalBlockEntity terminal) {

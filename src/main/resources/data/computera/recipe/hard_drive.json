@@ -7,7 +7,7 @@
   ],
   "key": {
     "I": "#c:ingots/iron",
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "Q": "#c:dusts/redstone",
     "G": "#c:glass_blocks"
   },

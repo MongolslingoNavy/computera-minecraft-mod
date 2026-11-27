@@ -7,7 +7,7 @@
   ],
   "key": {
     "G": "#c:glass_blocks",
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "I": "#c:ingots/iron"
   },
   "result": {

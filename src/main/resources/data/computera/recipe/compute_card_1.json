@@ -6,7 +6,7 @@
     "XXX"
   ],
   "key": {
-    "X": "computera:copper_wire",
+    "X": "#c:wires/copper",
     "W": "#c:gems/quartz",
     "Q": "#c:dusts/redstone",
     "R": "minecraft:paper"

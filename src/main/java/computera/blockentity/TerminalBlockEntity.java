@@ -316,11 +316,12 @@ public class TerminalBlockEntity extends BlockEntity {
                     "export - copy file to held drive",
                     "import - copy file from held drive",
                     "drive  - list held drive files",
-                    "count  - total amount of an item",
-                    "find   - where an item is stored",
-                    "store  - move item from inventory to ports",
-                    "take   - withdraw item from ports to inventory",
+                    "count  - total amount of an item or #tag",
+                    "find   - where an item or #tag is stored",
+                    "store  - move item or #tag from inventory to ports",
+                    "take   - withdraw item or #tag from ports to inventory",
                     "ports  - list logistics ports",
+                    "portfilter - set port filter (#tag, item id, or clear)",
                     "devices - list controllable devices",
                     "clear  - clear screen");
             case "ls" -> {
@@ -413,6 +414,7 @@ public class TerminalBlockEntity extends BlockEntity {
             case "store" -> storeItem(player, argument);
             case "take" -> takeItem(player, argument);
             case "ports" -> listPorts(player);
+            case "portfilter" -> setPortFilter(player, argument);
             case "devices" -> listDevices(player);
             default -> respond(player, "unknown command: " + command);
         }
@@ -647,7 +649,7 @@ public class TerminalBlockEntity extends BlockEntity {
 
     private void findItem(ServerPlayer player, String itemId) {
         if (itemId.isEmpty()) {
-            respond(player, "usage: find <item id>");
+            respond(player, "usage: find <item id or #tag>");
             return;
         }
         Cluster cluster = cluster();
@@ -655,7 +657,7 @@ public class TerminalBlockEntity extends BlockEntity {
             respond(player, "no cabinet in this cluster");
             return;
         }
-        var entries = computera.logistics.LogisticsIndex.build(serverLevel, cluster).getOrDefault(itemId, java.util.List.of());
+        var entries = computera.logistics.LogisticsIndex.find(serverLevel, cluster, itemId);
         if (entries.isEmpty()) {
             respond(player, "not found: " + itemId);
             return;
@@ -738,12 +740,51 @@ public class TerminalBlockEntity extends BlockEntity {
             respond(player, "(no logistics ports)");
             return;
         }
+        int index = 1;
         for (var pos : cluster.ports()) {
             String filter = level != null
                     && level.getBlockEntity(pos) instanceof computera.blockentity.LogisticsPortBlockEntity port
                     && port.filter() != null ? port.filter() : "(none)";
-            respond(player, pos.toShortString() + " -> " + filter);
+            respond(player, "#" + index++ + " " + pos.toShortString() + " -> " + filter);
         }
+    }
+
+    private void setPortFilter(ServerPlayer player, String argument) {
+        String[] parts = argument.trim().split("\\s+", 2);
+        if (parts.length < 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+            respond(player, "usage: portfilter <port#> <#tag|item_id|clear>");
+            return;
+        }
+        Cluster cluster = cluster();
+        if (cluster == null || level == null) {
+            respond(player, "no cabinet in this cluster");
+            return;
+        }
+        var ports = new ArrayList<>(cluster.ports());
+        int idx = parseIndex(parts[0], ports.size());
+        if (idx < 0) {
+            respond(player, "invalid port index: " + parts[0]);
+            return;
+        }
+        BlockPos pos = ports.get(idx);
+        if (!level.hasChunkAt(pos)
+                || !(level.getBlockEntity(pos) instanceof computera.blockentity.LogisticsPortBlockEntity port)) {
+            respond(player, "port unavailable at " + pos.toShortString());
+            return;
+        }
+        String spec = parts[1].trim();
+        if ("clear".equalsIgnoreCase(spec) || "none".equalsIgnoreCase(spec)) {
+            port.setFilter(null);
+            respond(player, "port #" + (idx + 1) + " filter cleared");
+            return;
+        }
+        String normalized = computera.util.ItemFilter.normalize(spec);
+        if (normalized == null) {
+            respond(player, "invalid item id or #tag: " + spec);
+            return;
+        }
+        port.setFilter(normalized);
+        respond(player, "port #" + (idx + 1) + " filter set to " + normalized);
     }
 
     private static int parseCount(String text, int fallback) {
@@ -979,15 +1020,17 @@ public class TerminalBlockEntity extends BlockEntity {
             return;
         }
         String[] parts = data.split("\\|", -1);
+        String normalizedItem = parts.length == 5 ? computera.util.ItemFilter.normalize(parts[2]) : null;
         if (parts.length != 5 || parts[0].isBlank() || parts[1].isBlank()
-                || net.minecraft.resources.Identifier.tryParse(parts[2]) == null
+                || normalizedItem == null
                 || parseInt(parts[3]) == null || parseInt(parts[3]) <= 0
                 || parseInt(parts[4]) == null || parseInt(parts[4]) <= 0
                 || cabinet.rules().size() >= 128) {
             respond(player, "invalid automation rule");
             return;
         }
-        String rule = "move|" + data + "|true";
+        parts[2] = normalizedItem;
+        String rule = "move|" + String.join("|", parts) + "|true";
         cabinet.addRule(rule);
         sendAutomationState(player);
     }

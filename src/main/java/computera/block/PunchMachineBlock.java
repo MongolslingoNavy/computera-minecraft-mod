@@ -45,6 +45,9 @@ public class PunchMachineBlock extends Block implements EntityBlock {
     @Override
     protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player,
                                           InteractionHand hand, BlockHitResult hitResult) {
+        if (computera.util.WrenchSupport.isWrench(stack)) {
+            return computera.util.WrenchSupport.handleBlockUse(stack, state, level, pos, player, hand, hitResult);
+        }
         if (!level.isClientSide() && level.getBlockEntity(pos) instanceof PunchMachineBlockEntity machine) {
             machine.useCard(player, stack, hand);
         }
